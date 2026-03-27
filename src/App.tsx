@@ -36,7 +36,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(isSupabaseConfigured);
   const [authError, setAuthError] = useState("");
-  const [allowedDomains, setAllowedDomains] = useState<string[]>(["company.com"]);
+  const [allowedDomains, setAllowedDomains] = useState<string[]>(["muhayu.com"]);
   const [sessionTimeout, setSessionTimeout] = useState("60분");
   const [members, setMembers] = useState<Member[]>([...mockMembers]);
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([...mockOrgMembers]);
@@ -45,7 +45,7 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [user, setUser] = useState({
     name: "홍길동",
-    email: "hong@company.com",
+    email: "hong@muhayu.com",
     department: "보안팀",
     role: "Admin" as Role,
   });
