@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase";
 export async function signInWithGoogle() {
   if (!supabase) throw new Error("Supabase is not configured");
 
-  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin).toString();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
