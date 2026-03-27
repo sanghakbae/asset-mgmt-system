@@ -17,9 +17,12 @@ import {
   UsageTable,
 } from "@/features/asset-management/views";
 import { canAccessSettingsMenu, canManageAssets, canOpenSettings, canViewMenu, getNextAssetId } from "@/features/asset-management/utils";
-import { isSupabaseConfigured } from "@/lib/supabase";
-import { createAsset, listAssets } from "@/services/assets";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { getCurrentSession, signInWithGoogle, signOutAuth } from "@/services/auth";
+import { createAsset, importAssetsBulk, listAssets } from "@/services/assets";
 import { exportAssetsToExcel, exportOrgMembersToExcel } from "@/services/excel";
+import { ensureMemberForAuthUser, listMembers } from "@/services/members";
+import { importOrgMembersBulk, listOrgMembers } from "@/services/org-members";
 import type { Asset, AssetDraft, AssetPolicySettings, AssetType, AssetUser, ImportedAssetRow, ImportedOrgMemberRow, Member, MenuKey, OrgMember, Role, SettingsMenuKey } from "@/features/asset-management/types";
 
 export default function App() {
@@ -31,6 +34,8 @@ export default function App() {
   const [settingsMenu, setSettingsMenu] = useState<SettingsMenuKey>("members");
   const [assetType, setAssetType] = useState<AssetType>("hardware");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(isSupabaseConfigured);
+  const [authError, setAuthError] = useState("");
   const [allowedDomains, setAllowedDomains] = useState<string[]>(["company.com"]);
   const [sessionTimeout, setSessionTimeout] = useState("60분");
   const [members, setMembers] = useState<Member[]>([...mockMembers]);
@@ -38,7 +43,7 @@ export default function App() {
   const [assetUsers, setAssetUsers] = useState<AssetUser[]>([...mockAssetUsers]);
   const [assetPolicySettings, setAssetPolicySettings] = useState<AssetPolicySettings>(defaultAssetPolicySettings);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [user] = useState({
+  const [user, setUser] = useState({
     name: "홍길동",
     email: "hong@company.com",
     department: "보안팀",
@@ -141,14 +146,15 @@ export default function App() {
 
     let cancelled = false;
 
-    const loadAssets = async () => {
+    const loadInitialData = async () => {
       setIsAssetsLoading(true);
       setAssetsError("");
 
       try {
-        const remoteAssets = await listAssets();
+        const [remoteAssets, remoteOrgMembers] = await Promise.all([listAssets(), listOrgMembers()]);
         if (!cancelled) {
           setAssets(remoteAssets);
+          setOrgMembers(remoteOrgMembers);
         }
       } catch (error) {
         if (!cancelled) {
@@ -161,12 +167,94 @@ export default function App() {
       }
     };
 
-    void loadAssets();
+    void loadInitialData();
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setIsAuthLoading(false);
+      return;
+    }
+
+    let mounted = true;
+
+    const hydrateSession = async () => {
+      try {
+        const session = await getCurrentSession();
+        await applySession(session?.user?.email ?? null, session?.user ?? null);
+      } catch (error) {
+        if (mounted) {
+          setAuthError(error instanceof Error ? error.message : "로그인 상태를 확인하지 못했습니다.");
+          setIsAuthLoading(false);
+        }
+      }
+    };
+
+    const applySession = async (email: string | null, authUser: Parameters<Parameters<typeof supabase.auth.onAuthStateChange>[0]>[1]["user"] | null) => {
+      if (!mounted) return;
+
+      if (!email || !authUser) {
+        setIsLoggedIn(false);
+        setIsAuthLoading(false);
+        return;
+      }
+
+      const normalizedEmail = email.toLowerCase();
+      const domain = normalizedEmail.split("@")[1] ?? "";
+      const isAllowedDomain = allowedDomains.length === 0 || allowedDomains.some((allowedDomain) => allowedDomain.toLowerCase() === domain);
+
+      if (!isAllowedDomain) {
+        await signOutAuth();
+        if (mounted) {
+          setAuthError("허용되지 않은 도메인입니다.");
+          setIsLoggedIn(false);
+          setIsAuthLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const [currentMember, remoteMembers] = await Promise.all([ensureMemberForAuthUser(authUser), listMembers()]);
+        if (!mounted) return;
+
+        setMembers(remoteMembers);
+        setUser({
+          name: currentMember.name,
+          email: currentMember.email,
+          department: currentMember.department || "-",
+          role: currentMember.role,
+        });
+        setAuthError("");
+        setIsLoggedIn(true);
+      } catch (error) {
+        if (mounted) {
+          setAuthError(error instanceof Error ? error.message : "회원 정보를 불러오지 못했습니다.");
+          setIsLoggedIn(false);
+        }
+      } finally {
+        if (mounted) {
+          setIsAuthLoading(false);
+        }
+      }
+    };
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void applySession(session?.user?.email ?? null, session?.user ?? null);
+    });
+
+    void hydrateSession();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [allowedDomains]);
 
   useEffect(() => {
     if (menu === "settings" && !canOpenSettings(user.role)) {
@@ -226,56 +314,94 @@ export default function App() {
     }
   };
 
-  const handleImportAssets = (rows: ImportedAssetRow[]) => {
+  const handleImportAssets = async (rows: ImportedAssetRow[]) => {
     if (rows.length === 0) {
       setAssetsError("가져올 수 있는 엑셀 행이 없습니다. name, type, category 컬럼을 확인해주세요.");
       return;
     }
 
-    let nextAssets = [...assets];
-    const importedAssets: Asset[] = rows.map((row) => {
-      const generatedId = getNextAssetId(nextAssets, row.type, assetPolicySettings);
-      const asset: Asset = {
-        id: generatedId,
-        name: row.name,
-        type: row.type,
-        category: row.category,
-        status: row.status ?? (row.type === "hardware" ? "사용가능" : "활성"),
-        unitPrice: row.unitPrice ?? 0,
-        quantity: row.quantity ?? 0,
-      };
-      nextAssets = [...nextAssets, asset];
-      return asset;
-    });
+    try {
+      if (isSupabaseConfigured) {
+        const savedAssets = await importAssetsBulk(rows);
+        setAssets(savedAssets);
+      } else {
+        let nextAssets = [...assets];
+        const importedAssets: Asset[] = rows.map((row) => {
+          const generatedId = getNextAssetId(nextAssets, row.type, assetPolicySettings);
+          const asset: Asset = {
+            id: generatedId,
+            name: row.name,
+            type: row.type,
+            category: row.category,
+            status: row.status ?? (row.type === "hardware" ? "사용가능" : "활성"),
+            unitPrice: row.unitPrice ?? 0,
+            quantity: row.quantity ?? 0,
+          };
+          nextAssets = [...nextAssets, asset];
+          return asset;
+        });
 
-    setAssets((prev) => [...prev, ...importedAssets]);
-    setAssetsError("");
-    setMenu("dashboard");
+        setAssets((prev) => [...prev, ...importedAssets]);
+      }
+
+      setAssetsError("");
+      setMenu("dashboard");
+    } catch (error) {
+      setAssetsError(error instanceof Error ? error.message : "자산 엑셀 가져오기에 실패했습니다.");
+    }
   };
 
-  const handleImportOrgMembers = (rows: ImportedOrgMemberRow[]) => {
+  const handleImportOrgMembers = async (rows: ImportedOrgMemberRow[]) => {
     if (rows.length === 0) {
       setAssetsError("가져올 수 있는 구성원 행이 없습니다. 구성원_목록 시트 컬럼을 확인해주세요.");
       return;
     }
 
-    const importedMembers: OrgMember[] = rows.map((row, index) => ({
-      id: index + 1,
-      name: row.name,
-      position: row.position,
-      category: row.category,
-      cell: row.cell,
-      unit: row.unit,
-      part: row.part,
-      location: row.location,
-    }));
+    try {
+      if (isSupabaseConfigured) {
+        const savedMembers = await importOrgMembersBulk(rows);
+        setOrgMembers(savedMembers);
+      } else {
+        const importedMembers: OrgMember[] = rows.map((row, index) => ({
+          id: index + 1,
+          name: row.name,
+          position: row.position,
+          category: row.category,
+          cell: row.cell,
+          unit: row.unit,
+          part: row.part,
+          location: row.location,
+        }));
 
-    setOrgMembers(importedMembers);
-    setAssetsError("");
+        setOrgMembers(importedMembers);
+      }
+
+      setAssetsError("");
+    } catch (error) {
+      setAssetsError(error instanceof Error ? error.message : "구성원 엑셀 가져오기에 실패했습니다.");
+    }
   };
 
   if (!isLoggedIn) {
-    return <LoginScreen onLogin={() => setIsLoggedIn(true)} />;
+    return (
+      <LoginScreen
+        isLoading={isAuthLoading}
+        errorMessage={authError}
+        onLogin={() => {
+          if (!isSupabaseConfigured) {
+            setIsLoggedIn(true);
+            return;
+          }
+
+          setAuthError("");
+          setIsAuthLoading(true);
+          void signInWithGoogle().catch((error) => {
+            setAuthError(error instanceof Error ? error.message : "Google 로그인에 실패했습니다.");
+            setIsAuthLoading(false);
+          });
+        }}
+      />
+    );
   }
 
   return (
@@ -299,7 +425,22 @@ export default function App() {
             setSettingsMenu(key);
             setSearch("");
           }}
-          onLogout={() => setIsLoggedIn(false)}
+          onLogout={() => {
+            if (!isSupabaseConfigured) {
+              setIsLoggedIn(false);
+              return;
+            }
+
+            setIsAuthLoading(true);
+            void signOutAuth()
+              .catch((error) => {
+                setAuthError(error instanceof Error ? error.message : "로그아웃에 실패했습니다.");
+              })
+              .finally(() => {
+                setIsLoggedIn(false);
+                setIsAuthLoading(false);
+              });
+          }}
         />
 
         <main className="p-6 lg:p-8">
