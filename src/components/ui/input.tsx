@@ -12,7 +12,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       ref={ref}
       type={type}
       className={[
-        "w-full rounded-[10px] border border-slate-300 bg-white px-2 py-2 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200",
+        "w-full rounded-[10px] border border-slate-300 bg-white px-3 py-2.5 text-sm leading-5 text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200 placeholder:text-slate-400",
         className,
       ]
         .filter(Boolean)

@@ -30,3 +30,10 @@ export async function getCurrentSession(): Promise<Session | null> {
   if (error) throw error;
   return data.session;
 }
+
+export async function refreshCurrentSession(): Promise<Session | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.auth.refreshSession();
+  if (error) throw error;
+  return data.session;
+}

@@ -7,6 +7,6 @@ type BadgeProps = HTMLAttributes<HTMLDivElement> & {
 
 export function Badge({ className = "", variant = "default", ...props }: BadgeProps) {
   const variantClassName =
-    variant === "outline" ? "border px-2.5 py-1 text-xs font-medium" : "px-2.5 py-1 text-xs font-medium";
+    variant === "outline" ? "border px-1.5 py-0.5 text-[11px] font-medium leading-none" : "px-1.5 py-0.5 text-[11px] font-medium leading-none";
   return <div className={[variantClassName, className].filter(Boolean).join(" ")} {...props} />;
 }

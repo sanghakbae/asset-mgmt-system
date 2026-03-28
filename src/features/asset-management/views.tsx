@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import {
   AppWindow,
   ChevronRight,
@@ -19,8 +19,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { menuItems, settingMenus, usageData } from "./data";
-import { canAccessSettingsMenu, canManageAccounts, canManageAssets, canOpenSettings, canViewMenu, getPageDescription, getPageTitle, getSearchPlaceholder, roleBadge, statusBadge } from "./utils";
+import { menuItems, settingMenus } from "./data";
+import {
+  canAccessSettingsMenu,
+  canManageAccounts,
+  canManageAssets,
+  canOpenSettings,
+  canViewMenu,
+  formatAssetDate,
+  getDisplayedAssetUnitPrice,
+  getPageDescription,
+  getPageTitle,
+  getSearchPlaceholder,
+  hasHardwareDepreciationInputs,
+  roleBadge,
+  statusBadge,
+  toDateInputValue,
+} from "./utils";
 import type {
   Asset,
   AssetDraft,
@@ -28,6 +43,7 @@ import type {
   AssetType,
   AssetUser,
   AuditLog,
+  HardwareAssignment,
   ImportedAssetRow,
   ImportedOrgMemberRow,
   Member,
@@ -35,17 +51,38 @@ import type {
   OrgMember,
   Role,
   SettingsMenuKey,
-  ThemeKey,
+  SoftwareAssignment,
   UserProfile,
 } from "./types";
 
 const TABLE_PAGE_SIZE = 25;
+const REGISTERED_ASSET_PAGE_SIZE = 10;
 
 type LoginScreenProps = {
   onLogin: () => void;
   isLoading?: boolean;
   errorMessage?: string;
 };
+
+export function AuthLoadingScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+      <div className="w-full max-w-sm rounded-[10px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-slate-900 text-white">
+            <Shield className="h-4 w-4" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold">자산 관리 시스템</h1>
+          </div>
+        </div>
+        <div className="rounded-[10px] border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+          로그인 상태를 확인하고 있습니다.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function LoginScreen({ onLogin, isLoading = false, errorMessage = "" }: LoginScreenProps) {
   return (
@@ -61,7 +98,6 @@ export function LoginScreen({ onLogin, isLoading = false, errorMessage = "" }: L
         </div>
 
         <div className="space-y-1">
-          <h2 className="text-xl font-semibold tracking-tight">Google 계정으로 로그인</h2>
           <p className="text-xs text-slate-500">사내 Google 계정으로 로그인한 사용자만 접근할 수 있습니다.</p>
         </div>
 
@@ -76,7 +112,7 @@ export function LoginScreen({ onLogin, isLoading = false, errorMessage = "" }: L
         )}
 
         <Button
-          className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-slate-300 bg-white text-sm text-slate-900 hover:bg-slate-50"
+          className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-slate-900 bg-slate-900 text-sm text-white hover:bg-slate-800"
           onClick={onLogin}
           disabled={isLoading}
         >
@@ -97,13 +133,15 @@ type SidebarProps = {
   menu: MenuKey;
   settingsMenu: SettingsMenuKey;
   isSidebarCollapsed: boolean;
-  hardwareCount: number;
-  softwareCount: number;
-  memberCount: number;
+  hardwareAssignedCount: number;
+  softwareAssignedCount: number;
+  orgMemberCount: number;
+  sessionRemainingLabel: string;
   user: UserProfile;
   onToggleSidebar: () => void;
   onMenuSelect: (key: MenuKey) => void;
   onSettingsMenuSelect: (key: SettingsMenuKey) => void;
+  onExtendSession: () => void;
   onLogout: () => void;
 };
 
@@ -111,13 +149,15 @@ export function Sidebar({
   menu,
   settingsMenu,
   isSidebarCollapsed,
-  hardwareCount,
-  softwareCount,
-  memberCount,
+  hardwareAssignedCount,
+  softwareAssignedCount,
+  orgMemberCount,
+  sessionRemainingLabel,
   user,
   onToggleSidebar,
   onMenuSelect,
   onSettingsMenuSelect,
+  onExtendSession,
   onLogout,
 }: SidebarProps) {
   const visibleMenuItems = menuItems.filter((item) => {
@@ -129,7 +169,7 @@ export function Sidebar({
   const visibleSettingMenus = settingMenus.filter((item) => canAccessSettingsMenu(user.role, item.key));
 
   return (
-    <aside className="flex min-h-screen flex-col border-r border-slate-200 bg-[#eef2f7] shadow-[inset_-1px_0_0_rgba(148,163,184,0.18)] transition-all duration-200">
+    <aside className="flex w-full flex-col border-b border-slate-200 bg-[#eef2f7] shadow-[inset_0_-1px_0_rgba(148,163,184,0.18)] transition-all duration-200 lg:min-h-screen lg:border-b-0 lg:border-r lg:shadow-[inset_-1px_0_0_rgba(148,163,184,0.18)]">
       <div className="border-b border-slate-200 bg-white/70 p-4 backdrop-blur">
         {isSidebarCollapsed ? (
           <div className="flex justify-center">
@@ -152,7 +192,7 @@ export function Sidebar({
         )}
       </div>
 
-      <nav className="p-3">
+      <nav className="w-full p-3">
         <div className="space-y-2">
           {visibleMenuItems.map((item) => {
             const Icon = item.icon;
@@ -208,9 +248,9 @@ export function Sidebar({
         <div className="mt-auto space-y-4 p-4">
           <Card className="rounded-[14px] border border-slate-200 bg-white/80 shadow-[0_16px_34px_rgba(15,23,42,0.08)] backdrop-blur">
             <CardContent className="space-y-3 p-5">
-              <SidebarMetric label="하드웨어" value={hardwareCount} />
-              <SidebarMetric label="소프트웨어" value={softwareCount} />
-              <SidebarMetric label="회원 수" value={memberCount} />
+              <SidebarMetric label="하드웨어 할당" value={hardwareAssignedCount} />
+              <SidebarMetric label="소프트웨어 할당" value={softwareAssignedCount} />
+              <SidebarMetric label="구성원 수" value={orgMemberCount} />
             </CardContent>
           </Card>
 
@@ -224,6 +264,10 @@ export function Sidebar({
                   <p className="truncate text-sm font-semibold">{user.name}</p>
                   <p className="truncate text-xs text-slate-500">{user.email}</p>
                   <p className="mt-1 text-xs text-slate-500">{user.department}</p>
+                  <p className="mt-1 text-xs text-slate-500">세션 남은 시간 {sessionRemainingLabel}</p>
+                  <Button variant="outline" className="mt-2 h-6 rounded-[8px] px-2 py-0 text-[10px]" onClick={onExtendSession}>
+                    연장
+                  </Button>
                 </div>
               </div>
               <Button variant="outline" className="mt-4 w-full rounded-[10px]" onClick={onLogout}>
@@ -257,28 +301,28 @@ type PageHeaderProps = {
 
 export function PageHeader({ menu, settingsMenu, search, onSearchChange, onCreateAsset, currentUserRole }: PageHeaderProps) {
   const showSearch =
-    menu === "hardware" || menu === "software" || menu === "usage" || (menu === "settings" && settingsMenu !== "security");
+    menu === "dashboard" || menu === "hardware" || menu === "usage" || (menu === "settings" && settingsMenu !== "security");
 
   return (
-    <div className="rounded-[12px] border border-slate-700 bg-slate-800 p-2.5 shadow-[0_12px_28px_rgba(15,23,42,0.2)]">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="w-full rounded-[14px] border border-slate-700 bg-slate-800 px-3 py-3 sm:px-4 shadow-[0_12px_28px_rgba(15,23,42,0.2)]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="mt-0.5 text-[15px] font-semibold tracking-tight text-white">{getPageTitle(menu, settingsMenu)}</h2>
-          <p className="mt-1.5 text-[11px] text-slate-200">{getPageDescription(menu, settingsMenu)}</p>
+          <h2 className="text-lg font-semibold tracking-tight text-white">{getPageTitle(menu, settingsMenu)}</h2>
+          <p className="mt-1 text-sm text-slate-200">{getPageDescription(menu, settingsMenu)}</p>
         </div>
 
         {showSearch && (
-          <div className="flex flex-col gap-2.5 sm:flex-row sm:justify-end">
-            <div className="relative min-w-[224px]">
+          <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:justify-end lg:w-auto">
+            <div className="relative w-full sm:min-w-[224px] sm:flex-1 lg:w-auto lg:min-w-[224px]">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <Input
-                className="h-9 rounded-[10px] border-white/20 bg-white pl-10 text-xs"
+                className="h-10 rounded-[10px] border-white/20 bg-white pl-10 text-sm"
                 placeholder={getSearchPlaceholder(menu, settingsMenu)}
                 value={search}
                 onChange={(event) => onSearchChange(event.target.value)}
               />
             </div>
-            {(menu === "hardware" || menu === "software") && canManageAssets(currentUserRole) && (
+            {menu === "hardware" && canManageAssets(currentUserRole) && (
               <Button className="h-9 rounded-[10px] px-4" onClick={onCreateAsset}>
                 <Plus className="mr-2 h-4 w-4" /> 자산 추가
               </Button>
@@ -292,152 +336,370 @@ export function PageHeader({ menu, settingsMenu, search, onSearchChange, onCreat
 
 export function UserRegistrationForm({
   onRegister,
-  onReclaim,
   assets,
-  users,
+  hardwareAssignments,
+  softwareAssignments,
+  policySettings,
+  onImportExcel,
+  onExportExcel,
 }: {
   onRegister: (user: {
     name: string;
-    email: string;
     department: string;
-    position: string;
     assetId: string;
-    assignedQuantity: number;
+    os?: string;
+    macAddress?: string;
+    ipAddress?: string;
   }) => void;
-  onReclaim: (userId: number) => void;
   assets: Asset[];
-  users: AssetUser[];
+  hardwareAssignments: HardwareAssignment[];
+  softwareAssignments: SoftwareAssignment[];
+  policySettings: AssetPolicySettings;
+  onImportExcel: (rows: ImportedAssetRow[]) => Promise<void>;
+  onExportExcel: () => void;
 }) {
-  const { pageItems: pagedUsers, currentPage, totalPages, setCurrentPage } = usePagedData(users);
+  const normalizedHardwareCategoryOptions =
+    policySettings.hardwareCategories.length > 0 ? policySettings.hardwareCategories : ["모니터", "랩탑", "데스크탑"];
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [form, setForm] = useState({
     name: "",
-    email: "",
     department: "",
-    position: "",
     assetType: "hardware" as AssetType,
-    assetId: assets[0]?.id ?? "",
-    assignedQuantity: 1,
+    hardwareCategory: normalizedHardwareCategoryOptions[0],
+    assetId: "",
+    os: "",
+    macAddress: "",
+    ipAddress: "",
   });
 
-  const selectableAssets = assets.filter((asset) => asset.type === form.assetType);
+  const selectableAssets = assets.filter((asset) =>
+    form.assetType === "hardware"
+      ? asset.type === "hardware" && asset.category === form.hardwareCategory && (asset.quantity ?? 0) > 0
+      : asset.type === "software" && (asset.quantity ?? 0) > 0
+  );
+  const getSelectableAssetLabel = (asset: Asset) =>
+    asset.type === "hardware"
+      ? `${asset.category} (${asset.quantity ?? 0}대 남음)`
+      : `${asset.softwareName || asset.name || asset.id} (${asset.quantity ?? 0}석 남음)`;
 
   useEffect(() => {
-    if (!selectableAssets.some((asset) => asset.id === form.assetId) && selectableAssets[0]) {
-      setForm((prev) => ({ ...prev, assetId: selectableAssets[0]!.id }));
+    if (form.assetId && !selectableAssets.some((asset) => asset.id === form.assetId)) {
+      setForm((prev) => ({ ...prev, assetId: "" }));
     }
   }, [form.assetId, selectableAssets]);
 
   const reset = () =>
     setForm({
       name: "",
-      email: "",
       department: "",
-      position: "",
       assetType: "hardware",
-      assetId: selectableAssets[0]?.id ?? "",
-      assignedQuantity: 1,
+      hardwareCategory: normalizedHardwareCategoryOptions[0],
+      assetId: "",
+      os: "",
+      macAddress: "",
+      ipAddress: "",
     });
 
   const selectedAsset = selectableAssets.find((asset) => asset.id === form.assetId);
+  const needsHardwareNetworkFields =
+    form.assetType === "hardware" && (form.hardwareCategory === "랩탑" || form.hardwareCategory === "데스크탑");
+  const hardwareExampleAssetName =
+    form.hardwareCategory === "모니터" ? "MON-2207" : form.hardwareCategory === "데스크탑" ? "DST-0118" : "LAP-0142";
+  const hardwareExampleOs = form.hardwareCategory === "데스크탑" ? "Windows 11 Enterprise" : "Windows 11 Pro";
+  const hardwareExampleMac = form.hardwareCategory === "데스크탑" ? "D1:E2:F3:A4:B5:C6" : "A1:B2:C3:D4:E5:F6";
+  const hardwareExampleIp = form.hardwareCategory === "데스크탑" ? "10.10.2.118" : "10.10.1.142";
+  const assignedRows = useMemo(
+    () => [
+      ...hardwareAssignments.map((assignment) => ({
+          key: `hardware-${assignment.id}`,
+          userName: assignment.userName,
+          department: assignment.department ?? "-",
+          assetType: "하드웨어",
+          assetName: assignment.pcName || assignment.assetCode,
+          quantity: "1",
+          assignedAt: assignment.assignedAt ? assignment.assignedAt.slice(0, 19).replace("T", " ") : "-",
+        })),
+      ...softwareAssignments.map((assignment) => ({
+        key: `software-${assignment.id}`,
+        userName: assignment.userName,
+        department: assignment.department || "-",
+        assetType: "소프트웨어",
+        assetName: assignment.softwareName,
+        quantity: `${assignment.assignedSeats}`,
+        assignedAt: assignment.assignedAt.slice(0, 19).replace("T", " "),
+      })),
+    ],
+    [hardwareAssignments, softwareAssignments]
+  );
+  const recentAssignedRows = useMemo(
+    () =>
+      [...assignedRows]
+        .sort((a, b) => b.assignedAt.localeCompare(a.assignedAt))
+        .slice(0, 10),
+    [assignedRows]
+  );
 
   const handleSubmit = () => {
-    if (!form.name.trim() || !form.email.trim() || !form.department.trim() || !form.position.trim() || !selectedAsset) return;
+    if (!form.name.trim() || !form.department.trim() || !selectedAsset) return;
+    if (needsHardwareNetworkFields && (!form.os.trim() || !form.macAddress.trim() || !form.ipAddress.trim())) return;
     onRegister({
       name: form.name.trim(),
-      email: form.email.trim(),
       department: form.department.trim(),
-      position: form.position.trim(),
       assetId: form.assetId,
-      assignedQuantity: form.assignedQuantity,
+      os: needsHardwareNetworkFields ? form.os.trim() : undefined,
+      macAddress: needsHardwareNetworkFields ? form.macAddress.trim() : undefined,
+      ipAddress: needsHardwareNetworkFields ? form.ipAddress.trim() : undefined,
     });
     reset();
   };
 
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      const { importAssetsFromExcel } = await import("@/services/excel");
+      const importedRows = await importAssetsFromExcel(file);
+      await onImportExcel(importedRows);
+    } finally {
+      setIsImporting(false);
+      event.target.value = "";
+    }
+  };
+
+  const assignmentRows: PairRow[] = [
+    {
+      key: "name",
+      label: "이름",
+      input: (
+        <Input
+          placeholder="예: 홍길동"
+          className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
+          value={form.name}
+          onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+        />
+      ),
+      sample: "홍길동",
+    },
+    {
+      key: "department",
+      label: "소속부서",
+      input: (
+        <Input
+          placeholder="예: 인프라팀"
+          className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
+          value={form.department}
+          onChange={(event) => setForm((prev) => ({ ...prev, department: event.target.value }))}
+        />
+      ),
+      sample: "인프라팀",
+    },
+    {
+      key: "assetType",
+      label: "자산 유형",
+      input: (
+        <select
+          className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+          value={form.assetType}
+          onChange={(event) =>
+            setForm((prev) => ({
+              ...prev,
+              assetType: event.target.value as AssetType,
+              hardwareCategory: normalizedHardwareCategoryOptions[0],
+              assetId: "",
+              os: "",
+              macAddress: "",
+              ipAddress: "",
+            }))
+          }
+        >
+          <option value="hardware">하드웨어</option>
+          <option value="software">소프트웨어</option>
+        </select>
+      ),
+      sample: form.assetType === "hardware" ? "하드웨어" : "소프트웨어",
+    },
+  ];
+
+  if (form.assetType === "hardware") {
+    assignmentRows.push({
+      key: "hardwareCategory",
+      label: "장비 선택",
+      input: (
+        <select
+          className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+          value={form.hardwareCategory}
+          onChange={(event) =>
+            setForm((prev) => ({
+              ...prev,
+              hardwareCategory: event.target.value,
+              assetId: "",
+              os: "",
+              macAddress: "",
+              ipAddress: "",
+            }))
+          }
+        >
+          {normalizedHardwareCategoryOptions.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </select>
+      ),
+      sample: form.hardwareCategory,
+    });
+  }
+
+  assignmentRows.push({
+    key: "assetId",
+    label: form.assetType === "hardware" ? "자산 선택" : "소프트웨어 선택",
+    input: (
+      <select
+        className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+        value={form.assetId}
+        onChange={(event) => setForm((prev) => ({ ...prev, assetId: event.target.value }))}
+      >
+        <option value="">자산을 선택하세요</option>
+        {selectableAssets.map((asset) => (
+          <option key={asset.id} value={asset.id}>
+            {getSelectableAssetLabel(asset)}
+          </option>
+        ))}
+      </select>
+    ),
+    sample: form.assetType === "hardware" ? hardwareExampleAssetName : "Burp Suite Pro (14석 남음)",
+  });
+
+  if (needsHardwareNetworkFields) {
+    assignmentRows.push(
+      {
+        key: "os",
+        label: "OS 정보",
+        input: (
+          <Input
+            placeholder="예: Windows 11 Pro"
+            className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
+            value={form.os}
+            onChange={(event) => setForm((prev) => ({ ...prev, os: event.target.value }))}
+          />
+        ),
+        sample: hardwareExampleOs,
+      },
+      {
+        key: "macAddress",
+        label: "MAC Address",
+        input: (
+          <Input
+            placeholder="예: A1:B2:C3:D4:E5:F6"
+            className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
+            value={form.macAddress}
+            onChange={(event) => setForm((prev) => ({ ...prev, macAddress: event.target.value }))}
+          />
+        ),
+        sample: hardwareExampleMac,
+      },
+      {
+        key: "ipAddress",
+        label: "IP Address",
+        input: (
+          <Input
+            placeholder="예: 10.10.1.142"
+            className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
+            value={form.ipAddress}
+            onChange={(event) => setForm((prev) => ({ ...prev, ipAddress: event.target.value }))}
+          />
+        ),
+        sample: hardwareExampleIp,
+      }
+    );
+  }
+
+  if (form.assetType === "software") {
+    assignmentRows.push(
+      {
+        key: "seats",
+        label: "할당 수량",
+        input: (
+          <div className="flex h-8 items-center rounded-[8px] border border-slate-200 bg-slate-50 px-2 text-xs text-slate-600">
+            1석
+          </div>
+        ),
+        sample: "1석",
+      },
+      {
+        key: "remaining",
+        label: "잔여 라이선스",
+        input: (
+          <div className="flex h-8 items-center rounded-[8px] border border-slate-200 bg-slate-50 px-2 text-xs text-slate-600">
+            {selectedAsset ? `${selectedAsset.quantity ?? 0}석` : "-"}
+          </div>
+        ),
+        sample: "14석",
+      }
+    );
+  }
+
+  if (form.assetType === "hardware") {
+    assignmentRows.push({
+      key: "target",
+      label: "할당 대상 장비",
+      input: (
+        <div className="flex h-8 items-center rounded-[8px] border border-slate-200 bg-slate-50 px-2 text-xs text-slate-600">
+          {selectedAsset ? `${selectedAsset.category} / ${selectedAsset.id}` : "-"}
+        </div>
+      ),
+      sample: hardwareExampleAssetName,
+    });
+  }
+
   return (
     <div className="space-y-6">
       <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
-        <CardContent className="space-y-4 p-3">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input
-              placeholder="이름"
-              className="h-11 rounded-[10px]"
-              value={form.name}
-              onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-            />
-            <Input
-              placeholder="이메일"
-              className="h-11 rounded-[10px]"
-              value={form.email}
-              onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-            />
-            <Input
-              placeholder="부서"
-              className="h-11 rounded-[10px]"
-              value={form.department}
-              onChange={(event) => setForm((prev) => ({ ...prev, department: event.target.value }))}
-            />
-            <Input
-              placeholder="직책"
-              className="h-11 rounded-[10px]"
-              value={form.position}
-              onChange={(event) => setForm((prev) => ({ ...prev, position: event.target.value }))}
-            />
-            <select
-              className="h-11 rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
-              value={form.assetType}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  assetType: event.target.value as AssetType,
-                  assetId: "",
-                }))
-              }
-            >
-              <option value="hardware">하드웨어</option>
-              <option value="software">소프트웨어</option>
-            </select>
-            <select
-              className="h-11 rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
-              value={form.assetId}
-              onChange={(event) => setForm((prev) => ({ ...prev, assetId: event.target.value }))}
-            >
-              {selectableAssets.map((asset) => (
-                <option key={asset.id} value={asset.id}>
-                  {asset.id} / {asset.name}
-                </option>
-              ))}
-            </select>
-            <Input
-              type="number"
-              min={1}
-              max={selectedAsset?.quantity ?? 1}
-              placeholder="차감 수량"
-              className="h-11 rounded-[10px]"
-              value={String(form.assignedQuantity)}
-              onChange={(event) =>
-                setForm((prev) => ({
-                  ...prev,
-                  assignedQuantity: Math.max(1, Number(event.target.value) || 1),
-                }))
-              }
-            />
+        <CardContent className="flex items-center justify-between gap-3 p-2.5">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">엑셀 Import / Export</h3>
+            <p className="mt-0.5 text-xs leading-5 text-slate-500">
+              DB 기준 컬럼 형식으로 자산을 가져오거나 내보냅니다. 하드웨어 사용자 정보는 `name`이 아니라 `assignee` 컬럼을 사용합니다.
+            </p>
           </div>
-          {selectedAsset && (
-            <div className="rounded-[10px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              선택 자산 수량 (잔여수량: {selectedAsset.quantity ?? 0})
-            </div>
-          )}
+          <div className="flex gap-2">
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
+            <Button
+              variant="outline"
+              className="h-8 rounded-[8px] px-3 text-xs"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+            >
+              <FileSpreadsheet className="mr-2 h-4 w-4" /> {isImporting ? "Import 중..." : "Import"}
+            </Button>
+            <Button className="h-8 rounded-[8px] px-3 text-xs" onClick={onExportExcel} disabled={isImporting}>
+              <Download className="mr-2 h-4 w-4" /> Export
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
+        <CardContent className="space-y-3 p-2.5">
+          <div className="rounded-[8px] border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm leading-6 text-slate-700">
+            실제 보유 중인 자산만 선택해서 사용자에게 할당합니다.
+          </div>
+          <PairedFormGrid
+            description="실제 할당 예시입니다. 보유 자산 중 선택 가능한 항목만 사용자에게 할당합니다."
+            rows={assignmentRows}
+          />
           <div className="flex justify-end">
             <Button
-              className="rounded-[10px]"
+              className="h-8 rounded-[8px] px-3 text-xs"
               onClick={handleSubmit}
               disabled={
                 !form.name ||
-                !form.email ||
                 !form.department ||
-                !form.position ||
                 !selectedAsset ||
-                form.assignedQuantity > (selectedAsset.quantity ?? 0)
+                (needsHardwareNetworkFields && (!form.os.trim() || !form.macAddress.trim() || !form.ipAddress.trim()))
               }
             >
               자산 사용자 등록
@@ -448,47 +710,46 @@ export function UserRegistrationForm({
 
       <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
         <CardContent className="p-3">
-          <div className="mb-3 rounded-[10px] bg-slate-800 px-4 py-3">
-            <h3 className="text-base font-semibold text-white">자산 사용자 목록</h3>
-            <p className="mt-1 text-sm text-slate-300">자산 할당 대상자를 조회하고 지급된 수량을 회수할 수 있습니다.</p>
+          <div className="mb-3">
+            <h3 className="text-base font-semibold text-slate-900">현재 자산 할당 현황</h3>
+            <p className="mt-1 text-sm text-slate-500">실제 자산에 할당된 사용자 목록을 조회합니다.</p>
           </div>
           <div className="overflow-hidden rounded-[10px] border border-slate-200">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="text-center">이름</TableHead>
-                  <TableHead className="text-center">이메일</TableHead>
-                  <TableHead className="text-center">부서</TableHead>
-                  <TableHead className="text-center">직책</TableHead>
-                  <TableHead className="text-center">할당 자산</TableHead>
-                  <TableHead className="text-center">차감 수량</TableHead>
-                  <TableHead className="text-center">등록일</TableHead>
-                  <TableHead className="text-center">관리</TableHead>
+                  <TableHead className="w-[120px] text-center">사용자</TableHead>
+                  <TableHead className="w-[120px] text-center">부서</TableHead>
+                  <TableHead className="w-[100px] text-center">자산 유형</TableHead>
+                  <TableHead className="text-center">자산명</TableHead>
+                  <TableHead className="w-[90px] text-center">수량</TableHead>
+                  <TableHead className="w-[180px] text-center">할당 일시</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagedUsers.map((user) => (
-                  <TableRow key={user.id} className="hover:bg-slate-50/80">
-                    <TableCell className="text-center font-medium">{user.name}</TableCell>
-                    <TableCell className="text-center">{user.email}</TableCell>
-                    <TableCell className="text-center">{user.department}</TableCell>
-                    <TableCell className="text-center">{user.position}</TableCell>
-                    <TableCell className="text-center">{user.assetName ?? "-"}</TableCell>
-                    <TableCell className="text-center">{user.assignedQuantity ?? 0}</TableCell>
-                    <TableCell className="text-center">{user.createdAt}</TableCell>
-                    <TableCell className="text-center">
-                      <Button variant="outline" className="h-8 rounded-[10px] px-3 text-xs" onClick={() => onReclaim(user.id)}>
-                        회수
-                      </Button>
+                {recentAssignedRows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-6 text-center text-sm text-slate-500">
+                      현재 할당된 자산이 없습니다.
                     </TableCell>
+                  </TableRow>
+                )}
+                {recentAssignedRows.map((row) => (
+                  <TableRow key={row.key} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={row.userName} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.department} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.assetType} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.assetName} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.quantity} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.assignedAt} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
-          <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
         </CardContent>
       </Card>
+
     </div>
   );
 }
@@ -497,177 +758,597 @@ export function AssetRegistrationForm({
   assetType,
   onAssetTypeChange,
   onSave,
+  onUpdateAsset,
   assets,
   policySettings,
-  onImportExcel,
-  onExportExcel,
 }: {
   assetType: AssetType;
   onAssetTypeChange: (value: AssetType) => void;
   onSave: (draft: AssetDraft, assetType: AssetType) => void;
+  onUpdateAsset: (asset: Asset) => void;
   assets: Asset[];
   policySettings: AssetPolicySettings;
-  onImportExcel: (rows: ImportedAssetRow[]) => void;
-  onExportExcel: () => void;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const filteredAssets = assets.filter((asset) => asset.type === assetType);
-  const { pageItems: pagedAssets, currentPage, totalPages, setCurrentPage } = usePagedData(filteredAssets);
+  const hardwareCategoryOptions = ["모니터", "랩탑", "데스크탑"] as const;
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [draft, setDraft] = useState<AssetDraft>({
     name: "",
-    category: assetType === "hardware" ? policySettings.hardwareCategories[0] ?? "노트북" : policySettings.softwareCategories[0] ?? "OS",
+    category: assetType === "hardware" ? hardwareCategoryOptions[0] : policySettings.softwareCategories[0] ?? "OS",
+    status: assetType === "hardware" ? "유휴" : "사용",
     unitPrice: 0,
+    acquiredAt: "",
+    createdAt: "",
+    expiresAt: "",
+    totalQuantity: 1,
+    availableQuantity: 1,
     quantity: 1,
+    os: "",
+    pcName: "",
+    assignee: "",
+    department: "",
+    macAddress: "",
+    ipAddress: "",
+    note: "",
   });
-
+  const requiresHardwareOs = assetType === "hardware" && (draft.category === "랩탑" || draft.category === "데스크탑");
+  const requiresHardwareVendor = assetType === "hardware";
   useEffect(() => {
     setDraft({
       name: "",
-      category: assetType === "hardware" ? policySettings.hardwareCategories[0] ?? "노트북" : policySettings.softwareCategories[0] ?? "OS",
+      category: assetType === "hardware" ? hardwareCategoryOptions[0] : policySettings.softwareCategories[0] ?? "OS",
+      status: assetType === "hardware" ? "유휴" : "사용",
       unitPrice: 0,
+      acquiredAt: "",
+      createdAt: "",
+      expiresAt: "",
+      totalQuantity: 1,
+      availableQuantity: 1,
       quantity: 1,
+      os: "",
+      pcName: "",
+      assignee: "",
+      department: "",
+      macAddress: "",
+      ipAddress: "",
+      note: "",
     });
   }, [assetType, policySettings]);
 
   const handleSave = () => {
-    const trimmedName = draft.name.trim();
-    if (!trimmedName) return;
-    onSave({ ...draft, name: trimmedName }, assetType);
+    const trimmedSoftwareName = draft.name.trim();
+    if (assetType === "software" && !trimmedSoftwareName) return;
+    onSave(
+      {
+        ...draft,
+        name: "",
+        softwareName: assetType === "software" ? trimmedSoftwareName : undefined,
+        pcName: undefined,
+        os: requiresHardwareOs ? draft.os?.trim() || undefined : undefined,
+        vendor: requiresHardwareVendor ? draft.vendor?.trim() || undefined : undefined,
+        macAddress: undefined,
+        ipAddress: undefined,
+        assignee: undefined,
+        department: undefined,
+        acquiredAt: draft.acquiredAt || undefined,
+        createdAt: draft.createdAt || undefined,
+        expiresAt: assetType === "software" ? draft.expiresAt || undefined : undefined,
+        note: draft.note?.trim() || undefined,
+      },
+      assetType
+    );
   };
 
-  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const registrationRows: PairRow[] = [
+    {
+      key: "assetType",
+      label: "자산 유형",
+      input: (
+        <select
+          className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+          value={assetType}
+          onChange={(event) => onAssetTypeChange(event.target.value as AssetType)}
+        >
+          <option value="hardware">하드웨어</option>
+          <option value="software">소프트웨어</option>
+        </select>
+      ),
+      sample: assetType === "hardware" ? "하드웨어" : "소프트웨어",
+    },
+  ];
 
-    const { importAssetsFromExcel } = await import("@/services/excel");
-    const importedRows = await importAssetsFromExcel(file);
-    onImportExcel(importedRows);
-    event.target.value = "";
-  };
+  if (assetType === "software") {
+    registrationRows.push({
+      key: "softwareName",
+      label: "소프트웨어명",
+      input: (
+        <Input
+          placeholder="예: Burp Suite Pro"
+          className="h-8 border-slate-200 px-2 text-xs"
+          value={draft.name}
+          onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
+        />
+      ),
+      sample: "Burp Suite Pro",
+    });
+  }
+
+  registrationRows.push({
+    key: "category",
+    label: "카테고리",
+    input: (
+      <select
+        className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+        value={draft.category}
+        onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
+      >
+        {assetType === "hardware"
+          ? hardwareCategoryOptions.map((category) => <option key={category}>{category}</option>)
+          : policySettings.softwareCategories.map((category) => <option key={category}>{category}</option>)}
+      </select>
+    ),
+    sample: assetType === "hardware" ? draft.category || "랩탑" : "보안",
+  });
+
+  registrationRows.push({
+    key: "unitPrice",
+    label: assetType === "hardware" ? "도입가" : "단가",
+    input: (
+      <Input
+        type="number"
+        min={0}
+        placeholder="예: 3200000"
+        className="h-8 border-slate-200 px-2 text-xs"
+        value={String(draft.unitPrice)}
+        onChange={(event) => setDraft((prev) => ({ ...prev, unitPrice: Math.max(0, Number(event.target.value) || 0) }))}
+      />
+    ),
+    sample: assetType === "hardware" ? "1,850,000원" : "680,000원",
+  });
+
+  registrationRows.push({
+    key: "quantity",
+    label: "수량",
+    input: (
+      <Input
+        type="number"
+        min={1}
+        placeholder={assetType === "hardware" ? "예: 10" : "예: 20"}
+        className="h-8 border-slate-200 px-2 text-xs"
+        value={String(draft.quantity ?? 1)}
+        onChange={(event) =>
+          setDraft((prev) => {
+            const quantity = Math.max(1, Number(event.target.value) || 1);
+            return {
+              ...prev,
+              totalQuantity: quantity,
+              availableQuantity: quantity,
+              quantity,
+            };
+          })
+        }
+      />
+    ),
+    sample: assetType === "hardware" ? "10" : "20",
+  });
+
+  if (assetType === "hardware") {
+    if (requiresHardwareOs) {
+      registrationRows.push({
+        key: "os",
+        label: "OS 정보",
+        input: (
+          <Input
+            placeholder="예: Windows 11 Pro"
+            className="h-8 border-slate-200 px-2 text-xs"
+            value={draft.os ?? ""}
+            onChange={(event) => setDraft((prev) => ({ ...prev, os: event.target.value }))}
+          />
+        ),
+        sample: draft.category === "데스크탑" ? "Windows 11 Enterprise" : "Windows 11 Pro",
+      });
+    }
+
+    if (requiresHardwareVendor) {
+      registrationRows.push({
+        key: "vendor",
+        label: "밴더",
+        input: (
+          <Input
+            placeholder="예: Dell"
+            className="h-8 border-slate-200 px-2 text-xs"
+            value={draft.vendor ?? ""}
+            onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))}
+          />
+        ),
+        sample: draft.category === "모니터" ? "LG" : draft.category === "데스크탑" ? "Dell" : "Lenovo",
+      });
+    }
+
+    registrationRows.push({
+      key: "acquiredAt",
+      label: "도입일",
+      input: (
+        <Input
+          type="date"
+          className="h-8 border-slate-200 px-2 text-xs"
+          value={draft.acquiredAt ?? ""}
+          onChange={(event) => setDraft((prev) => ({ ...prev, acquiredAt: event.target.value }))}
+        />
+      ),
+      sample: "2026-03-28",
+    });
+  } else {
+    registrationRows.push({
+      key: "expiresAt",
+      label: "라이선스 만료일",
+      input: (
+        <Input
+          type="date"
+          className="h-8 border-slate-200 px-2 text-xs"
+          value={draft.expiresAt ?? ""}
+          onChange={(event) => setDraft((prev) => ({ ...prev, expiresAt: event.target.value }))}
+        />
+      ),
+      sample: "2027-03-28",
+    });
+  }
+
+  registrationRows.push(
+    {
+      key: "note",
+      label: "비고",
+      input: (
+        <Input
+          placeholder={assetType === "hardware" ? "예: 신규 입고 장비" : "예: 연간 구독"}
+          className="h-8 border-slate-200 px-2 text-xs"
+          value={draft.note ?? ""}
+          onChange={(event) => setDraft((prev) => ({ ...prev, note: event.target.value }))}
+        />
+      ),
+      sample: assetType === "hardware" ? "신규 입고 장비" : "연간 구독 라이선스",
+    },
+    {
+      key: "createdAt",
+      label: "등록 일시",
+      input: (
+        <Input
+          type="datetime-local"
+          className="h-8 border-slate-200 px-2 text-xs"
+          value={draft.createdAt ?? ""}
+          onChange={(event) => setDraft((prev) => ({ ...prev, createdAt: event.target.value }))}
+        />
+      ),
+      sample: "2026-03-28T09:30",
+    }
+  );
 
   return (
     <div className="space-y-6">
       <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
-        <CardContent className="flex items-center justify-between gap-3 p-3">
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">엑셀 Import / Export</h3>
-            <p className="mt-1 text-sm text-slate-500">자산 목록을 엑셀로 가져오거나 내보낼 수 있습니다.</p>
+        <CardContent className="space-y-2.5 p-2.5">
+          <div className="rounded-[8px] border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm leading-6 text-slate-700">
+            자산 ID와 등록 일시는 저장 시 자동 생성됩니다.
           </div>
-          <div className="flex gap-2">
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileChange} />
-            <Button variant="outline" className="rounded-[10px]" onClick={() => fileInputRef.current?.click()}>
-              <FileSpreadsheet className="mr-2 h-4 w-4" /> Import
-            </Button>
-            <Button className="rounded-[10px]" onClick={onExportExcel}>
-              <Download className="mr-2 h-4 w-4" /> Export
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
-        <CardContent className="space-y-3 p-3">
-          <FormRow label="자산 유형">
-            <select
-              className="h-11 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
-              value={assetType}
-              onChange={(event) => onAssetTypeChange(event.target.value as AssetType)}
-            >
-              <option value="hardware">하드웨어</option>
-              <option value="software">소프트웨어</option>
-            </select>
-          </FormRow>
-
-          <FormRow label="자산명">
-            <Input
-              placeholder="예: 맥북 프로 16형"
-              className="h-11 border-slate-200"
-              value={draft.name}
-              onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
-            />
-          </FormRow>
-
-          <FormRow label="카테고리">
-            <select
-              className="h-11 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
-              value={draft.category}
-              onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
-            >
-              {assetType === "hardware"
-                ? policySettings.hardwareCategories.map((category) => <option key={category}>{category}</option>)
-                : policySettings.softwareCategories.map((category) => <option key={category}>{category}</option>)}
-            </select>
-          </FormRow>
-
-          <FormRow label="단가">
-            <Input
-              type="number"
-              min={0}
-              placeholder="예: 3200000"
-              className="h-11 border-slate-200"
-              value={String(draft.unitPrice)}
-              onChange={(event) => setDraft((prev) => ({ ...prev, unitPrice: Math.max(0, Number(event.target.value) || 0) }))}
-            />
-          </FormRow>
-
-          <FormRow label="수량">
-            <Input
-              type="number"
-              min={1}
-              placeholder="예: 10"
-              className="h-11 border-slate-200"
-              value={String(draft.quantity)}
-              onChange={(event) => setDraft((prev) => ({ ...prev, quantity: Math.max(1, Number(event.target.value) || 1) }))}
-            />
-          </FormRow>
+          <PairedFormGrid
+            description="실제 등록 예시입니다. 입력값과 별개로 등록 형식을 참고할 수 있습니다."
+            rows={registrationRows}
+          />
 
           <div className="flex justify-end">
-            <Button className="rounded-[10px]" onClick={handleSave} disabled={!draft.name.trim()}>
+            <Button
+              className="h-8 rounded-[8px] px-3 text-xs"
+              onClick={handleSave}
+              disabled={assetType === "hardware" ? (draft.quantity ?? 1) < 1 : !draft.name.trim()}
+            >
               자산 등록
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
-        <CardContent className="p-3">
-          <div className="mb-3 rounded-[10px] bg-slate-800 px-4 py-3">
-            <h3 className="text-base font-semibold text-white">{assetType === "hardware" ? "하드웨어 자산 목록" : "소프트웨어 자산 목록"}</h3>
-            <p className="mt-1 text-sm text-slate-300">등록된 자산 목록입니다.</p>
-          </div>
-          <div className="overflow-hidden rounded-[10px] border border-slate-200">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="text-center">ID</TableHead>
-                  <TableHead className="text-center">이름</TableHead>
-                  <TableHead className="text-center">카테고리</TableHead>
-                  <TableHead className="text-center">단가</TableHead>
-                  <TableHead className="text-center">수량</TableHead>
-                  <TableHead className="text-center">상태</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pagedAssets.map((asset) => (
-                  <TableRow key={`register-${asset.id}`} className="hover:bg-slate-50/80">
-                    <TableCell className="text-center">{asset.id}</TableCell>
-                    <TableCell className="text-center">{asset.name}</TableCell>
-                    <TableCell className="text-center">{asset.category}</TableCell>
-                    <TableCell className="text-center">{(asset.unitPrice ?? 0).toLocaleString()}원</TableCell>
-                    <TableCell className="text-center">수량 (잔여수량: {asset.quantity ?? 0})</TableCell>
+      <RegisteredAssetList
+        assetType={assetType}
+        assets={assets.filter((asset) => asset.type === assetType)}
+        selectedCategory={draft.category}
+        selectedSoftwareName={assetType === "software" ? draft.name.trim() : undefined}
+        onEdit={setEditingAsset}
+      />
+
+      {editingAsset && (
+        <RegisteredAssetEditModal
+          asset={editingAsset}
+          policySettings={policySettings}
+          onClose={() => setEditingAsset(null)}
+          onSave={(asset) => {
+            onUpdateAsset(asset);
+            setEditingAsset(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function RegisteredAssetList({
+  assetType,
+  assets,
+  selectedCategory,
+  selectedSoftwareName,
+  onEdit,
+}: {
+  assetType: AssetType;
+  assets: Asset[];
+  selectedCategory?: string;
+  selectedSoftwareName?: string;
+  onEdit: (asset: Asset) => void;
+}) {
+  const filteredAssets =
+    assetType === "hardware"
+      ? selectedCategory
+        ? assets.filter((asset) => asset.category === selectedCategory)
+        : assets
+      : assets.filter((asset) => {
+          if (selectedSoftwareName) {
+            return (asset.softwareName ?? asset.name ?? "").trim() === selectedSoftwareName;
+          }
+          return selectedCategory ? asset.category === selectedCategory : true;
+        });
+  const isHardwareExpired = (acquiredAt?: string) => {
+    if (!acquiredAt) return false;
+    const acquired = new Date(acquiredAt);
+    if (Number.isNaN(acquired.getTime())) return false;
+    const expiry = new Date(acquired);
+    expiry.setFullYear(expiry.getFullYear() + 5);
+    return expiry <= new Date();
+  };
+  const hardwareRows = useMemo(
+    () => {
+      if (filteredAssets.length === 0) return [];
+
+      const representative = filteredAssets[0];
+      const totalQuantity = filteredAssets.reduce((sum, asset) => sum + (asset.totalQuantity ?? asset.quantity ?? 0), 0);
+      const availableQuantity = filteredAssets.reduce((sum, asset) => sum + (asset.quantity ?? 0), 0);
+      const expiredCount = filteredAssets.reduce(
+        (sum, asset) => sum + (isHardwareExpired(asset.acquiredAt) ? asset.totalQuantity ?? asset.quantity ?? 0 : 0),
+        0
+      );
+
+      return [
+        {
+          key: selectedCategory ?? representative.category,
+          representative,
+          totalQuantity,
+          availableQuantity,
+          expiredCount,
+          isExpired: expiredCount > 0,
+          vendor: Array.from(new Set(filteredAssets.map((asset) => asset.vendor).filter(Boolean))).join(" / ") || "-",
+        },
+      ];
+    },
+    [filteredAssets]
+  );
+  const softwareRows = useMemo(
+    () =>
+      filteredAssets
+        .filter((asset) => asset.type === "software")
+        .reduce<
+          {
+            key: string;
+            representative: Asset;
+            category: string;
+            softwareName: string;
+            totalQuantity: number;
+            availableQuantity: number;
+            expiresAt?: string;
+            note?: string;
+          }[]
+        >((rows, asset) => {
+          const softwareName = asset.softwareName ?? asset.name ?? asset.category;
+          const key = `${asset.category}::${softwareName}`;
+          const existingRow = rows.find((row) => row.key === key);
+          if (existingRow) {
+            existingRow.totalQuantity += asset.totalQuantity ?? 0;
+            existingRow.availableQuantity += asset.quantity ?? 0;
+            if (!existingRow.expiresAt && asset.expiresAt) existingRow.expiresAt = asset.expiresAt;
+            if (!existingRow.note && asset.note) existingRow.note = asset.note;
+            return rows;
+          }
+
+          rows.push({
+            key,
+            representative: asset,
+            category: asset.category,
+            softwareName,
+            totalQuantity: asset.totalQuantity ?? 0,
+            availableQuantity: asset.quantity ?? 0,
+            expiresAt: asset.expiresAt,
+            note: asset.note,
+          });
+          return rows;
+        }, []),
+    [filteredAssets]
+  );
+  const registeredRows = assetType === "hardware" ? hardwareRows : softwareRows;
+  const { pageItems, currentPage, totalPages, setCurrentPage } = usePagedData(registeredRows, REGISTERED_ASSET_PAGE_SIZE);
+
+  return (
+    <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
+      <CardContent className="p-3">
+        <div className="mb-3">
+          <h3 className="text-base font-semibold text-slate-900">{assetType === "hardware" ? "등록된 하드웨어 자산" : "등록된 소프트웨어 자산"}</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            등록 단위로 묶어서 보여줍니다.
+          </p>
+        </div>
+        <div className="overflow-hidden rounded-[10px] border border-slate-200">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-50 hover:bg-slate-50">
+                {assetType === "hardware" ? (
+                  <>
+                    <TableHead className="w-[120px] text-center">카테고리</TableHead>
+                    <TableHead className="w-[90px] text-center">전체 수량</TableHead>
+                    <TableHead className="w-[90px] text-center">잔여 수량</TableHead>
+                    <TableHead className="w-[120px] text-center">밴더</TableHead>
+                    <TableHead className="w-[100px] text-center">연한 초과</TableHead>
+                  </>
+                ) : (
+                  <>
+                    <TableHead className="w-[120px] text-center">카테고리</TableHead>
+                    <TableHead className="text-center">소프트웨어 이름</TableHead>
+                    <TableHead className="w-[90px] text-center">전체 수량</TableHead>
+                    <TableHead className="w-[90px] text-center">잔여 수량</TableHead>
+                    <TableHead className="w-[140px] text-center">라이선스 만료일</TableHead>
+                    <TableHead className="text-center">비고</TableHead>
+                  </>
+                )}
+                <TableHead className="w-[80px] text-center">관리</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {assetType === "hardware" &&
+                pageItems.map((row) => (
+                  <TableRow key={row.key} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={row.representative.category} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(row.totalQuantity)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(row.availableQuantity)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.vendor} /></TableCell>
+                    <TableCell className="text-center"><ExpiredCountText value={row.expiredCount} /></TableCell>
                     <TableCell className="text-center">
-                      <Badge variant="outline" className={`rounded-full ${statusBadge(asset.status)}`}>
-                        {asset.status}
-                      </Badge>
+                      <Button variant="outline" className="h-8 rounded-[10px] px-3 text-xs" onClick={() => onEdit(row.representative)}>
+                        수정
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
-          <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-        </CardContent>
-      </Card>
+              {assetType === "software" &&
+                pageItems.map((row) => (
+                  <TableRow key={row.key} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={row.category} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.softwareName} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(row.totalQuantity)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(row.availableQuantity)} /></TableCell>
+                    <TableCell className="text-center"><ExpiryDateText value={row.expiresAt} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.note || "-"} /></TableCell>
+                    <TableCell className="text-center">
+                      <Button variant="outline" className="h-8 rounded-[10px] px-3 text-xs" onClick={() => onEdit(row.representative)}>
+                        수정
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </div>
+        <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function RegisteredAssetEditModal({
+  asset,
+  policySettings,
+  onClose,
+  onSave,
+}: {
+  asset: Asset;
+  policySettings: AssetPolicySettings;
+  onClose: () => void;
+  onSave: (asset: Asset) => void;
+}) {
+  const [draft, setDraft] = useState<Asset>({ ...asset });
+  const requiresHardwareOs = draft.type === "hardware" && (draft.category === "랩탑" || draft.category === "데스크탑");
+  const requiresHardwareVendor = draft.type === "hardware";
+
+  useEffect(() => {
+    setDraft({ ...asset });
+  }, [asset]);
+
+  const handleSave = () => {
+    onSave({
+      ...draft,
+      softwareName: draft.type === "software" ? (draft.softwareName ?? draft.name).trim() : undefined,
+      createdAt: draft.createdAt || undefined,
+      acquiredAt: draft.acquiredAt || undefined,
+      expiresAt: draft.expiresAt || undefined,
+      os: requiresHardwareOs ? draft.os?.trim() || undefined : undefined,
+      vendor: requiresHardwareVendor ? draft.vendor?.trim() || undefined : undefined,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-2xl rounded-[10px] bg-white p-4 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">등록 자산 수정</h3>
+          <Button variant="outline" onClick={onClose}>닫기</Button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {draft.type === "software" && (
+            <FormRow label="소프트웨어명" stacked>
+              <Input value={draft.softwareName ?? draft.name} onChange={(event) => setDraft((prev) => ({ ...prev, softwareName: event.target.value }))} />
+            </FormRow>
+          )}
+          <FormRow label="카테고리" stacked>
+            <select
+              className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
+              value={draft.category}
+              onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
+            >
+              {(draft.type === "hardware" ? policySettings.hardwareCategories : policySettings.softwareCategories).map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+          </FormRow>
+          <FormRow label={draft.type === "hardware" ? "도입가" : "단가"} stacked>
+            <Input type="number" min={0} value={String(draft.unitPrice ?? 0)} onChange={(event) => setDraft((prev) => ({ ...prev, unitPrice: Math.max(0, Number(event.target.value) || 0) }))} />
+          </FormRow>
+          {draft.type === "hardware" && (
+            <FormRow label="도입일" stacked>
+              <Input type="date" value={draft.acquiredAt ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, acquiredAt: event.target.value }))} />
+            </FormRow>
+          )}
+          {requiresHardwareOs && (
+            <FormRow label="OS 정보" stacked>
+              <Input value={draft.os ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, os: event.target.value }))} />
+            </FormRow>
+          )}
+          {requiresHardwareVendor && (
+            <FormRow label="밴더" stacked>
+              <Input value={draft.vendor ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))} />
+            </FormRow>
+          )}
+          {draft.type === "software" && (
+            <FormRow label="수량" stacked>
+              <Input
+                type="number"
+                min={1}
+                value={String(draft.totalQuantity ?? draft.quantity ?? 1)}
+                onChange={(event) => {
+                  const quantity = Math.max(1, Number(event.target.value) || 1);
+                  setDraft((prev) => ({ ...prev, totalQuantity: quantity, quantity: quantity }));
+                }}
+              />
+            </FormRow>
+          )}
+          {draft.type === "software" && (
+            <FormRow label="라이선스 만료일" stacked>
+              <Input type="date" value={draft.expiresAt ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, expiresAt: event.target.value }))} />
+            </FormRow>
+          )}
+          <FormRow label="등록 일시" stacked>
+            <Input type="datetime-local" value={draft.createdAt ? draft.createdAt.slice(0, 16) : ""} onChange={(event) => setDraft((prev) => ({ ...prev, createdAt: event.target.value }))} />
+          </FormRow>
+          <FormRow label="비고" stacked>
+            <Input value={draft.note ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, note: event.target.value }))} />
+          </FormRow>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>취소</Button>
+          <Button onClick={handleSave}>저장</Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -676,13 +1357,19 @@ export function OrgMemberManagement({
   data,
   onImportExcel,
   onExportExcel,
+  onSaveMember,
 }: {
   data: OrgMember[];
   onImportExcel: (rows: ImportedOrgMemberRow[]) => void;
   onExportExcel: () => void;
+  onSaveMember: (member: OrgMember) => Promise<void>;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { pageItems: pagedMembers, currentPage, totalPages, setCurrentPage } = usePagedData(data);
+  const [editingId, setEditingId] = useState<string | number | null>(null);
+  const [draft, setDraft] = useState<OrgMember | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSavedToast, setShowSavedToast] = useState(false);
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -692,6 +1379,26 @@ export function OrgMemberManagement({
     const importedRows = await importOrgMembersFromExcel(file);
     onImportExcel(importedRows);
     event.target.value = "";
+  };
+
+  const startEditing = (member: OrgMember) => {
+    setEditingId(member.id);
+    setDraft({ ...member });
+  };
+
+  const handleSave = async () => {
+    if (!draft) return;
+
+    setIsSaving(true);
+    try {
+      await onSaveMember(draft);
+      setEditingId(null);
+      setDraft(null);
+      setShowSavedToast(true);
+      window.setTimeout(() => setShowSavedToast(false), 1800);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -731,18 +1438,71 @@ export function OrgMemberManagement({
                   <TableHead className="text-center">유닛</TableHead>
                   <TableHead className="text-center">파트</TableHead>
                   <TableHead className="text-center">위치</TableHead>
+                  <TableHead className="w-[72px] text-center">관리</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pagedMembers.map((member) => (
                   <TableRow key={member.id} className="hover:bg-slate-50/80">
-                    <TableCell className="text-center font-medium">{member.name}</TableCell>
-                    <TableCell className="text-center">{member.position || "-"}</TableCell>
-                    <TableCell className="text-center">{member.category}</TableCell>
-                    <TableCell className="text-center">{member.cell}</TableCell>
-                    <TableCell className="text-center">{member.unit}</TableCell>
-                    <TableCell className="text-center">{member.part}</TableCell>
-                    <TableCell className="text-center">{member.location}</TableCell>
+                    <TableCell className="text-center font-medium">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+                      ) : (
+                        member.name
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.position || ""} onChange={(event) => setDraft({ ...draft, position: event.target.value })} />
+                      ) : (
+                        member.position || "-"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} />
+                      ) : (
+                        member.category
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.cell} onChange={(event) => setDraft({ ...draft, cell: event.target.value })} />
+                      ) : (
+                        member.cell
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value })} />
+                      ) : (
+                        member.unit
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.part} onChange={(event) => setDraft({ ...draft, part: event.target.value })} />
+                      ) : (
+                        member.part
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {editingId === member.id && draft ? (
+                        <Input className="h-8 rounded-[10px] text-xs" value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} />
+                      ) : (
+                        member.location
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        variant="outline"
+                        className="h-6 rounded-[8px] px-2 py-0 text-[10px]"
+                        disabled={isSaving && editingId === member.id}
+                        onClick={() => (editingId === member.id ? void handleSave() : startEditing(member))}
+                      >
+                        {editingId === member.id ? "저장" : "수정"}
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -751,30 +1511,37 @@ export function OrgMemberManagement({
           <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
         </CardContent>
       </Card>
+      {showSavedToast && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-none">
+          <div className="rounded-[10px] bg-slate-900 px-5 py-3 text-sm font-medium text-white shadow-xl">
+            저장이 완료되었습니다.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export function SummaryCardGrid({
-  hardwareCount,
-  softwareCount,
-  usageCount,
-  registerCount,
-  assetUserCount,
+  hardwareTotalQuantity,
+  softwareTotalQuantity,
+  assignedQuantity,
+  availableQuantity,
+  attentionQuantity,
 }: {
-  hardwareCount: number;
-  softwareCount: number;
-  usageCount: number;
-  registerCount: number;
-  assetUserCount: number;
+  hardwareTotalQuantity: number;
+  softwareTotalQuantity: number;
+  assignedQuantity: number;
+  availableQuantity: number;
+  attentionQuantity: number;
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-      <SummaryCard title="하드웨어 자산" subtitle="Physical inventory" value={hardwareCount} icon={<Laptop className="h-5 w-5" />} tone="indigo" />
-      <SummaryCard title="소프트웨어 자산" subtitle="Licenses and tools" value={softwareCount} icon={<AppWindow className="h-5 w-5" />} tone="sky" />
-      <SummaryCard title="자산 사용 현황" subtitle="Assigned assets" value={usageCount} icon={<Package className="h-5 w-5" />} tone="emerald" />
-      <SummaryCard title="자산 등록" subtitle="Registered assets" value={registerCount} icon={<Plus className="h-5 w-5" />} tone="amber" />
-      <SummaryCard title="자산 사용자 관리" subtitle="Managed assignees" value={assetUserCount} icon={<UserCircle2 className="h-5 w-5" />} tone="rose" />
+      <SummaryCard title="하드웨어 총수량" value={hardwareTotalQuantity} icon={<Laptop className="h-5 w-5" />} tone="indigo" />
+      <SummaryCard title="소프트웨어 총수량" value={softwareTotalQuantity} icon={<AppWindow className="h-5 w-5" />} tone="sky" />
+      <SummaryCard title="할당 수량" value={assignedQuantity} icon={<UserCircle2 className="h-5 w-5" />} tone="emerald" />
+      <SummaryCard title="잔여 수량" value={availableQuantity} icon={<Package className="h-5 w-5" />} tone="amber" />
+      <SummaryCard title="연한/만료 주의" value={attentionQuantity} icon={<Plus className="h-5 w-5" />} tone="rose" />
     </div>
   );
 }
@@ -784,72 +1551,180 @@ type DashboardAssetListsProps = {
 };
 
 export function DashboardAssetLists({ assets }: DashboardAssetListsProps) {
-  const hardwareAssets = assets.filter((asset) => asset.type === "hardware").slice(0, 10);
-  const softwareAssets = assets.filter((asset) => asset.type === "software").slice(0, 10);
+  const hardwareRows = assets
+    .filter((asset) => asset.type === "hardware")
+    .reduce<{ category: string; os: string; vendor: string; totalQuantity: number; availableQuantity: number; expiredQuantity: number }[]>((rows, asset) => {
+      const os = (asset.os ?? "").trim() || "-";
+      const existingRow = rows.find((row) => row.category === asset.category && row.os === os);
+      const acquired = asset.acquiredAt ? new Date(asset.acquiredAt) : null;
+      const isExpired =
+        acquired && !Number.isNaN(acquired.getTime()) ? new Date(acquired.getFullYear() + 5, acquired.getMonth(), acquired.getDate()) <= new Date() : false;
+      if (existingRow) {
+        existingRow.totalQuantity += asset.totalQuantity ?? 0;
+        existingRow.availableQuantity += asset.quantity ?? 0;
+        existingRow.expiredQuantity += isExpired ? asset.totalQuantity ?? 0 : 0;
+        existingRow.vendor = Array.from(new Set([existingRow.vendor, asset.vendor || "-"].filter(Boolean))).join(" / ");
+        return rows;
+      }
+
+      rows.push({
+        category: asset.category,
+        os,
+        vendor: asset.vendor || "-",
+        totalQuantity: asset.totalQuantity ?? 0,
+        availableQuantity: asset.quantity ?? 0,
+        expiredQuantity: isExpired ? asset.totalQuantity ?? 0 : 0,
+      });
+      return rows;
+    }, [])
+    .sort((a, b) => a.category.localeCompare(b.category, "ko") || a.os.localeCompare(b.os, "ko"));
+
+  const softwareRows = assets
+    .filter((asset) => asset.type === "software")
+    .reduce<{ category: string; softwareName: string; totalQuantity: number; availableQuantity: number; expiresAt?: string }[]>((rows, asset) => {
+      const softwareName = asset.softwareName ?? asset.name;
+      const existingRow = rows.find((row) => row.category === asset.category && row.softwareName === softwareName);
+      if (existingRow) {
+        existingRow.totalQuantity += asset.totalQuantity ?? 0;
+        existingRow.availableQuantity += asset.quantity ?? 0;
+        if (!existingRow.expiresAt && asset.expiresAt) existingRow.expiresAt = asset.expiresAt;
+        return rows;
+      }
+
+      rows.push({
+        category: asset.category,
+        softwareName,
+        totalQuantity: asset.totalQuantity ?? 0,
+        availableQuantity: asset.quantity ?? 0,
+        expiresAt: asset.expiresAt,
+      });
+      return rows;
+    }, [])
+    .sort((a, b) => a.category.localeCompare(b.category, "ko") || a.softwareName.localeCompare(b.softwareName, "ko"));
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-2">
-        <DashboardAssetTable title="하드웨어 목록" subtitle="최대 10개" assets={hardwareAssets} />
-        <DashboardAssetTable title="소프트웨어 목록" subtitle="최대 10개" assets={softwareAssets} />
-      </div>
+    <div className="grid gap-4 xl:grid-cols-2">
+      <DashboardHardwareAssetTable rows={hardwareRows} />
+      <DashboardSoftwareAssetTable rows={softwareRows} />
     </div>
   );
 }
 
-function DashboardAssetTable({ title, subtitle, assets }: { title: string; subtitle: string; assets: Asset[] }) {
+function DashboardCardShell({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
   return (
     <Card className="rounded-[18px] border border-[#e7eaf3] bg-white shadow-[0_18px_40px_rgba(18,24,40,0.05)]">
       <CardContent className="p-4">
-        <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="mb-4 flex items-end justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold text-[#16191f]">{title}</h3>
-            <p className="mt-1 text-xs text-[#7a8599]">{subtitle}</p>
+            <p className="mt-1 text-xs text-slate-500">{description}</p>
           </div>
-          <div className="rounded-[12px] bg-[#eef2ff] px-3 py-1.5 text-[11px] font-medium text-[#4b57d1]">Overview</div>
         </div>
         <div className="overflow-hidden rounded-[10px] border border-slate-200 bg-white">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="w-[88px] text-center">ID</TableHead>
-                <TableHead className="w-[140px] text-center">이름</TableHead>
-                <TableHead className="w-[96px] text-center">카테고리</TableHead>
-                <TableHead className="w-[120px] text-center">수량</TableHead>
-                <TableHead className="w-[88px] text-center">상태</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {assets.map((asset) => (
-                <TableRow key={`${title}-${asset.id}`} className="hover:bg-slate-50/80">
-                  <TableCell className="text-center"><AutoFitText value={asset.id} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={asset.name} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={asset.category} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={`수량 (잔여수량: ${asset.quantity ?? 0})`} /></TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline" className={`rounded-full ${statusBadge(asset.status)}`}>
-                      {asset.status}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {children}
         </div>
       </CardContent>
     </Card>
   );
 }
 
+function DashboardHardwareAssetTable({
+  rows,
+}: {
+  rows: { category: string; os: string; vendor: string; totalQuantity: number; availableQuantity: number; expiredQuantity: number }[];
+}) {
+  return (
+    <DashboardCardShell title="하드웨어 자산 목록" description="엑셀 import 기준 카테고리와 OS 수량을 표시합니다.">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-slate-50 hover:bg-slate-50">
+            <TableHead className="w-[120px] text-center">카테고리</TableHead>
+            <TableHead className="w-[140px] text-center">OS 정보</TableHead>
+            <TableHead className="w-[110px] text-center">전체 수량</TableHead>
+            <TableHead className="w-[110px] text-center">잔여 수량</TableHead>
+            <TableHead className="w-[120px] text-center">밴더</TableHead>
+            <TableHead className="w-[110px] text-center">연한 초과</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="py-6 text-center text-sm text-slate-500">
+                등록된 하드웨어 자산이 없습니다.
+              </TableCell>
+            </TableRow>
+          )}
+          {rows.map((row) => (
+            <TableRow key={`${row.category}-${row.os}`} className="hover:bg-slate-50/80">
+              <TableCell className="text-center font-medium"><AutoFitText value={row.category} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={row.os} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={String(row.totalQuantity)} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={String(row.availableQuantity)} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={row.vendor} /></TableCell>
+              <TableCell className="text-center"><ExpiredCountText value={row.expiredQuantity} /></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </DashboardCardShell>
+  );
+}
+
+function DashboardSoftwareAssetTable({
+  rows,
+}: {
+  rows: { category: string; softwareName: string; totalQuantity: number; availableQuantity: number; expiresAt?: string }[];
+}) {
+  return (
+    <DashboardCardShell title="소프트웨어 자산 목록" description="엑셀 import 기준 소프트웨어 사용 수량을 표시합니다.">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-slate-50 hover:bg-slate-50">
+            <TableHead className="w-[120px] text-center">카테고리</TableHead>
+            <TableHead className="text-center">소프트웨어 이름</TableHead>
+            <TableHead className="w-[110px] text-center">전체 수량</TableHead>
+            <TableHead className="w-[110px] text-center">잔여 수량</TableHead>
+            <TableHead className="w-[140px] text-center">라이선스 만료일</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
+                등록된 소프트웨어 자산이 없습니다.
+              </TableCell>
+            </TableRow>
+          )}
+          {rows.map((row) => (
+            <TableRow key={`${row.category}-${row.softwareName}`} className="hover:bg-slate-50/80">
+              <TableCell className="text-center font-medium"><AutoFitText value={row.category} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={row.softwareName} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={String(row.totalQuantity)} /></TableCell>
+              <TableCell className="text-center"><AutoFitText value={String(row.availableQuantity)} /></TableCell>
+              <TableCell className="text-center"><ExpiryDateText value={row.expiresAt} /></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </DashboardCardShell>
+  );
+}
+
 function SummaryCard({
   title,
-  subtitle,
   value,
   icon,
   tone,
 }: {
   title: string;
-  subtitle: string;
   value: number;
   icon: ReactNode;
   tone: "indigo" | "sky" | "emerald" | "amber" | "rose";
@@ -899,8 +1774,7 @@ function SummaryCard({
       <CardContent className="flex min-h-[148px] flex-col justify-between p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className={`text-[11px] uppercase tracking-[0.16em] ${styles.subtext}`}>{subtitle}</p>
-            <h3 className={`mt-3 text-lg font-semibold ${styles.text}`}>{title}</h3>
+            <h3 className={`text-lg font-semibold ${styles.text}`}>{title}</h3>
           </div>
           <div className={`rounded-[14px] p-3 ${styles.icon}`}>
             {icon}
@@ -914,47 +1788,95 @@ function SummaryCard({
   );
 }
 
-export function AssetTable({ data }: { data: readonly Asset[] }) {
+export function AssetTable({
+  data,
+  currentUserRole,
+  onSaveAsset,
+}: {
+  data: readonly Asset[];
+  currentUserRole: Role;
+  onSaveAsset: (asset: Asset) => void;
+}) {
   const { pageItems, currentPage, totalPages, setCurrentPage } = usePagedData(data);
+  const isHardwareTable = data[0]?.type === "hardware";
+  const hardwareRows = useMemo(
+    () =>
+      data.reduce<{ category: string; os: string; vendor: string; totalQuantity: number; availableQuantity: number; expiredQuantity: number }[]>((rows, asset) => {
+        if (asset.type !== "hardware") return rows;
+
+        const category = asset.category;
+        const os = (asset.os ?? "").trim() || "-";
+        const existingRow = rows.find((row) => row.category === category && row.os === os);
+        const acquired = asset.acquiredAt ? new Date(asset.acquiredAt) : null;
+        const isExpired =
+          acquired && !Number.isNaN(acquired.getTime()) ? new Date(acquired.getFullYear() + 5, acquired.getMonth(), acquired.getDate()) <= new Date() : false;
+        if (existingRow) {
+          existingRow.totalQuantity += asset.totalQuantity ?? 0;
+          existingRow.availableQuantity += asset.quantity ?? 0;
+          existingRow.expiredQuantity += isExpired ? asset.totalQuantity ?? 0 : 0;
+          existingRow.vendor = Array.from(new Set([existingRow.vendor, asset.vendor || "-"].filter(Boolean))).join(" / ");
+          return rows;
+        }
+
+        rows.push({
+          category,
+          os,
+          vendor: asset.vendor || "-",
+          totalQuantity: asset.totalQuantity ?? 0,
+          availableQuantity: asset.quantity ?? 0,
+          expiredQuantity: isExpired ? asset.totalQuantity ?? 0 : 0,
+        });
+        return rows;
+      }, []),
+    [data]
+  );
 
   return (
     <Card className="rounded-[10px] border border-slate-200 bg-white shadow-sm">
       <CardContent className="p-3">
         <div className="mb-3">
-          <h3 className="text-base font-semibold text-slate-900">자산 목록</h3>
-          <p className="mt-1 text-sm text-slate-500">등록된 자산을 조회합니다.</p>
+          <h3 className="text-base font-semibold text-slate-900">{isHardwareTable ? "하드웨어 자산 목록" : "소프트웨어 자산 목록"}</h3>
         </div>
         <div className="overflow-hidden rounded-[10px] border border-slate-200">
           <Table>
-            <TableHeader>
-              <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="w-[92px] text-center">ID</TableHead>
-                <TableHead className="w-[160px] text-center">이름</TableHead>
-                <TableHead className="w-[110px] text-center">카테고리</TableHead>
-                <TableHead className="w-[110px] text-center">단가</TableHead>
-                <TableHead className="w-[140px] text-center">수량</TableHead>
-                <TableHead className="w-[92px] text-center">상태</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pageItems.map((asset) => (
-                <TableRow key={asset.id} className="hover:bg-slate-50/80">
-                  <TableCell className="text-center"><AutoFitText value={asset.id} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={asset.name} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={asset.category} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={`${(asset.unitPrice ?? 0).toLocaleString()}원`} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={`수량 (잔여수량: ${asset.quantity ?? 0})`} /></TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline" className={`rounded-full ${statusBadge(asset.status)}`}>
-                      {asset.status}
-                    </Badge>
-                  </TableCell>
+              <TableHeader>
+                <TableRow className="bg-slate-50 hover:bg-slate-50">
+                  <TableHead className="w-[120px] text-center">카테고리</TableHead>
+                  {isHardwareTable && <TableHead className="w-[130px] text-center">OS 정보</TableHead>}
+                  {!isHardwareTable && <TableHead className="w-[220px] text-center">소프트웨어 이름</TableHead>}
+                  <TableHead className="w-[110px] text-center">전체 수량</TableHead>
+                  <TableHead className="w-[110px] text-center">잔여 수량</TableHead>
+                  {isHardwareTable && <TableHead className="w-[120px] text-center">밴더</TableHead>}
+                  {isHardwareTable && <TableHead className="w-[110px] text-center">연한 초과</TableHead>}
+                  {!isHardwareTable && <TableHead className="w-[140px] text-center">라이선스 만료일</TableHead>}
                 </TableRow>
-              ))}
+              </TableHeader>
+              <TableBody>
+              {isHardwareTable &&
+                hardwareRows.map((row) => (
+                  <TableRow key={`${row.category}-${row.os}`} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={row.category} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.os} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(row.totalQuantity)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(row.availableQuantity)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={row.vendor} /></TableCell>
+                    <TableCell className="text-center"><ExpiredCountText value={row.expiredQuantity} /></TableCell>
+                  </TableRow>
+                ))}
+              {!isHardwareTable &&
+                pageItems.map((asset) => (
+                  <TableRow key={asset.id} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={asset.category} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={asset.softwareName ?? asset.name} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(asset.totalQuantity ?? 0)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={String(asset.quantity ?? 0)} /></TableCell>
+                    <TableCell className="text-center"><ExpiryDateText value={asset.expiresAt} /></TableCell>
+                  </TableRow>
+                ))}
             </TableBody>
           </Table>
         </div>
-        <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+        {!isHardwareTable && <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />}
       </CardContent>
     </Card>
   );
@@ -963,10 +1885,14 @@ export function AssetTable({ data }: { data: readonly Asset[] }) {
 export function MemberTable({
   data,
   onRoleChange,
+  onDepartmentChange,
+  onDeleteMember,
   currentUserRole,
 }: {
   data: Member[];
   onRoleChange: (id: number, role: Role) => void;
+  onDepartmentChange: (id: number, department: string) => void;
+  onDeleteMember: (id: number) => void;
   currentUserRole: Role;
 }) {
   const { pageItems, currentPage, totalPages, setCurrentPage } = usePagedData(data);
@@ -984,10 +1910,12 @@ export function MemberTable({
               <TableRow className="bg-slate-50 hover:bg-slate-50">
                 <TableHead className="w-[90px] text-center">이름</TableHead>
                 <TableHead className="w-[150px] text-center">이메일</TableHead>
-                <TableHead className="w-[96px] text-center">부서</TableHead>
+                <TableHead className="w-[160px] text-center">부서</TableHead>
                 <TableHead className="text-center">권한</TableHead>
-                <TableHead className="w-[100px] text-center">가입일</TableHead>
-                <TableHead className="w-[120px] text-center">최종 접속일</TableHead>
+                <TableHead className="w-[150px] text-center">가입일</TableHead>
+                <TableHead className="w-[180px] text-center">최종 접속일</TableHead>
+                <TableHead className="w-[110px] text-center">접속자 IP</TableHead>
+                <TableHead className="w-[72px] text-center">삭제</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -995,7 +1923,14 @@ export function MemberTable({
                 <TableRow key={member.id} className="hover:bg-slate-50/80">
                   <TableCell className="text-center font-medium"><AutoFitText value={member.name} /></TableCell>
                   <TableCell className="text-center"><AutoFitText value={member.email} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={member.department} /></TableCell>
+                  <TableCell className="text-center">
+                    <Input
+                      className="h-8 min-w-[140px] rounded-[10px] text-xs"
+                      value={member.department}
+                      onChange={(event) => onDepartmentChange(member.id, event.target.value)}
+                      disabled={!canManageAccounts(currentUserRole)}
+                    />
+                  </TableCell>
                   <TableCell className="text-center">
                     <select
                       className="h-8 rounded-[10px] border border-slate-200 bg-white px-2.5 text-xs outline-none"
@@ -1011,6 +1946,17 @@ export function MemberTable({
                   </TableCell>
                   <TableCell className="text-center"><AutoFitText value={member.joinedAt} /></TableCell>
                   <TableCell className="text-center"><AutoFitText value={member.lastLoginAt} /></TableCell>
+                  <TableCell className="text-center"><AutoFitText value={member.lastLoginIp ?? "-"} /></TableCell>
+                  <TableCell className="text-center">
+                    <Button
+                      variant="outline"
+                      className="h-8 rounded-[10px] px-3 text-xs"
+                      onClick={() => onDeleteMember(member.id)}
+                      disabled={!canManageAccounts(currentUserRole)}
+                    >
+                      삭제
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1041,7 +1987,7 @@ export function AuditLogTable({ data }: { data: readonly AuditLog[] }) {
                 <TableHead className="w-[150px] text-center">행위</TableHead>
                 <TableHead className="w-[150px] text-center">대상</TableHead>
                 <TableHead className="w-[100px] text-center">IP</TableHead>
-                <TableHead className="w-[130px] text-center">발생 일시</TableHead>
+                <TableHead className="w-[190px] text-center">발생 일시</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1064,12 +2010,12 @@ export function AuditLogTable({ data }: { data: readonly AuditLog[] }) {
   );
 }
 
-export function UsageTable({ search }: { search: string }) {
+export function UsageTable({ search, data }: { search: string; data: readonly UsageItem[] }) {
   const lowered = search.toLowerCase();
-  const filteredUsage = usageData.filter((item) =>
-    [item.name, item.assignee, item.department, item.usageStatus].some((value) => value.toLowerCase().includes(lowered))
-  );
-  const { pageItems, currentPage, totalPages, setCurrentPage } = usePagedData(filteredUsage);
+  const visibleItems = [...data]
+    .filter((item) => [item.user, item.department, item.assetType, item.category, item.pcName, item.registeredAt].some((value) => value.toLowerCase().includes(lowered)))
+    .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))
+    .slice(0, 50);
 
   return (
     <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
@@ -1082,35 +2028,28 @@ export function UsageTable({ search }: { search: string }) {
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50 hover:bg-slate-50">
-                <TableHead className="w-[92px] text-center">자산 ID</TableHead>
-                <TableHead className="w-[150px] text-center">자산명</TableHead>
-                <TableHead className="w-[90px] text-center">자산 유형</TableHead>
                 <TableHead className="w-[100px] text-center">사용자</TableHead>
                 <TableHead className="w-[100px] text-center">부서</TableHead>
-                <TableHead className="w-[90px] text-center">사용 상태</TableHead>
-                <TableHead className="w-[130px] text-center">등록 일시</TableHead>
+                <TableHead className="w-[90px] text-center">자산 유형</TableHead>
+                <TableHead className="w-[120px] text-center">카테고리</TableHead>
+                <TableHead className="w-[150px] text-center">PC Name</TableHead>
+                <TableHead className="w-[180px] text-center">할당 일시</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pageItems.map((item) => (
-                <TableRow key={`${item.id}-${item.assignee}`} className="hover:bg-slate-50/80">
-                  <TableCell className="text-center"><AutoFitText value={item.id} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={item.name} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={item.type} /></TableCell>
-                  <TableCell className="text-center"><AutoFitText value={item.assignee} /></TableCell>
+              {visibleItems.map((item, index) => (
+                <TableRow key={`${item.user}-${item.category}-${item.registeredAt}-${index}`} className="hover:bg-slate-50/80">
+                  <TableCell className="text-center"><AutoFitText value={item.user} /></TableCell>
                   <TableCell className="text-center"><AutoFitText value={item.department} /></TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline" className={`rounded-full ${statusBadge(item.usageStatus)}`}>
-                      {item.usageStatus}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-center"><AutoFitText value={item.createdAt} /></TableCell>
+                  <TableCell className="text-center"><AutoFitText value={item.assetType} /></TableCell>
+                  <TableCell className="text-center"><AutoFitText value={item.category} /></TableCell>
+                  <TableCell className="text-center"><AutoFitText value={item.pcName} /></TableCell>
+                  <TableCell className="text-center"><AutoFitText value={item.registeredAt} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
-        <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
       </CardContent>
     </Card>
   );
@@ -1207,11 +2146,16 @@ export function AssetPolicySettingsForm({
   settings: AssetPolicySettings;
   onSave: (settings: AssetPolicySettings) => void;
 }) {
+  const getNormalizedPrefixMap = (categories: string[], current: Record<string, string>, fallback: string) =>
+    Object.fromEntries(categories.map((category) => [category, current[category] || fallback]));
+
   const [draft, setDraft] = useState({
     hardwareCategories: settings.hardwareCategories.join(", "),
     softwareCategories: settings.softwareCategories.join(", "),
     hardwarePrefix: settings.hardwarePrefix,
     softwarePrefix: settings.softwarePrefix,
+    hardwareCategoryPrefixes: getNormalizedPrefixMap(settings.hardwareCategories, settings.hardwareCategoryPrefixes, settings.hardwarePrefix),
+    softwareCategoryPrefixes: getNormalizedPrefixMap(settings.softwareCategories, settings.softwareCategoryPrefixes, settings.softwarePrefix),
     sequenceDigits: String(settings.sequenceDigits),
   });
 
@@ -1221,59 +2165,115 @@ export function AssetPolicySettingsForm({
       softwareCategories: settings.softwareCategories.join(", "),
       hardwarePrefix: settings.hardwarePrefix,
       softwarePrefix: settings.softwarePrefix,
+      hardwareCategoryPrefixes: getNormalizedPrefixMap(settings.hardwareCategories, settings.hardwareCategoryPrefixes, settings.hardwarePrefix),
+      softwareCategoryPrefixes: getNormalizedPrefixMap(settings.softwareCategories, settings.softwareCategoryPrefixes, settings.softwarePrefix),
       sequenceDigits: String(settings.sequenceDigits),
     });
   }, [settings]);
 
   const handleSave = () => {
+    const hardwareCategories = draft.hardwareCategories.split(",").map((item) => item.trim()).filter(Boolean);
+    const softwareCategories = draft.softwareCategories.split(",").map((item) => item.trim()).filter(Boolean);
+
     onSave({
-      hardwareCategories: draft.hardwareCategories.split(",").map((item) => item.trim()).filter(Boolean),
-      softwareCategories: draft.softwareCategories.split(",").map((item) => item.trim()).filter(Boolean),
+      hardwareCategories,
+      softwareCategories,
       hardwarePrefix: draft.hardwarePrefix.trim() || "H",
       softwarePrefix: draft.softwarePrefix.trim() || "S",
+      hardwareCategoryPrefixes: getNormalizedPrefixMap(hardwareCategories, draft.hardwareCategoryPrefixes, draft.hardwarePrefix.trim() || "H"),
+      softwareCategoryPrefixes: getNormalizedPrefixMap(softwareCategories, draft.softwareCategoryPrefixes, draft.softwarePrefix.trim() || "S"),
       sequenceDigits: Math.max(1, Number(draft.sequenceDigits) || 3),
     });
   };
+
+  const hardwareCategories = draft.hardwareCategories.split(",").map((item) => item.trim()).filter(Boolean);
+  const softwareCategories = draft.softwareCategories.split(",").map((item) => item.trim()).filter(Boolean);
 
   return (
     <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
       <CardContent className="space-y-4 p-3">
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">하드웨어 카테고리</label>
-            <Input
-              className="h-11 rounded-[10px]"
-              value={draft.hardwareCategories}
-              onChange={(event) => setDraft((prev) => ({ ...prev, hardwareCategories: event.target.value }))}
-              placeholder="노트북, 서버, 네트워크"
-            />
+          <div className="space-y-4 rounded-[10px] border border-slate-200 bg-slate-50 p-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">하드웨어 카테고리</label>
+              <Input
+                className="mt-2 h-11 rounded-[10px] bg-white"
+                value={draft.hardwareCategories}
+                onChange={(event) => setDraft((prev) => ({ ...prev, hardwareCategories: event.target.value }))}
+                placeholder="모니터, 랩탑, 데스크탑"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">하드웨어 기본 Prefix</label>
+              <Input
+                className="mt-2 h-11 rounded-[10px] bg-white"
+                value={draft.hardwarePrefix}
+                onChange={(event) => setDraft((prev) => ({ ...prev, hardwarePrefix: event.target.value }))}
+                placeholder="H"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">하드웨어 카테고리별 ID Prefix</label>
+              <div className="grid gap-3 md:grid-cols-1 xl:grid-cols-2">
+                {hardwareCategories.map((category) => (
+                  <div key={category} className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-500">{category}</label>
+                    <Input
+                      className="h-11 rounded-[10px] bg-white"
+                      value={draft.hardwareCategoryPrefixes[category] ?? draft.hardwarePrefix}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          hardwareCategoryPrefixes: { ...prev.hardwareCategoryPrefixes, [category]: event.target.value },
+                        }))
+                      }
+                      placeholder={draft.hardwarePrefix || "H"}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">소프트웨어 카테고리</label>
-            <Input
-              className="h-11 rounded-[10px]"
-              value={draft.softwareCategories}
-              onChange={(event) => setDraft((prev) => ({ ...prev, softwareCategories: event.target.value }))}
-              placeholder="OS, 데이터베이스, 보안"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">하드웨어 ID Prefix</label>
-            <Input
-              className="h-11 rounded-[10px]"
-              value={draft.hardwarePrefix}
-              onChange={(event) => setDraft((prev) => ({ ...prev, hardwarePrefix: event.target.value }))}
-              placeholder="H"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-slate-700">소프트웨어 ID Prefix</label>
-            <Input
-              className="h-11 rounded-[10px]"
-              value={draft.softwarePrefix}
-              onChange={(event) => setDraft((prev) => ({ ...prev, softwarePrefix: event.target.value }))}
-              placeholder="S"
-            />
+          <div className="space-y-4 rounded-[10px] border border-slate-200 bg-slate-50 p-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">소프트웨어 카테고리</label>
+              <Input
+                className="mt-2 h-11 rounded-[10px] bg-white"
+                value={draft.softwareCategories}
+                onChange={(event) => setDraft((prev) => ({ ...prev, softwareCategories: event.target.value }))}
+                placeholder="OS, 데이터베이스, 보안"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">소프트웨어 기본 Prefix</label>
+              <Input
+                className="mt-2 h-11 rounded-[10px] bg-white"
+                value={draft.softwarePrefix}
+                onChange={(event) => setDraft((prev) => ({ ...prev, softwarePrefix: event.target.value }))}
+                placeholder="S"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">소프트웨어 카테고리별 ID Prefix</label>
+              <div className="grid gap-3 md:grid-cols-1 xl:grid-cols-2">
+                {softwareCategories.map((category) => (
+                  <div key={category} className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-500">{category}</label>
+                    <Input
+                      className="h-11 rounded-[10px] bg-white"
+                      value={draft.softwareCategoryPrefixes[category] ?? draft.softwarePrefix}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          softwareCategoryPrefixes: { ...prev.softwareCategoryPrefixes, [category]: event.target.value },
+                        }))
+                      }
+                      placeholder={draft.softwarePrefix || "S"}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
           <div className="space-y-2 md:col-span-2">
             <label className="block text-sm font-medium text-slate-700">시퀀스 자릿수</label>
@@ -1288,8 +2288,8 @@ export function AssetPolicySettingsForm({
           </div>
         </div>
         <div className="rounded-[10px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          예시 ID: {draft.hardwarePrefix || "H"}-{String(1).padStart(Math.max(1, Number(draft.sequenceDigits) || 3), "0")} /{" "}
-          {draft.softwarePrefix || "S"}-{String(1).padStart(Math.max(1, Number(draft.sequenceDigits) || 3), "0")}
+          예시 ID: {(draft.hardwareCategoryPrefixes[hardwareCategories[0]] || draft.hardwarePrefix || "H")}-{String(1).padStart(Math.max(1, Number(draft.sequenceDigits) || 3), "0")} /{" "}
+          {(draft.softwareCategoryPrefixes[softwareCategories[0]] || draft.softwarePrefix || "S")}-{String(1).padStart(Math.max(1, Number(draft.sequenceDigits) || 3), "0")}
         </div>
         <div className="flex justify-end">
           <Button className="rounded-[10px]" onClick={handleSave}>
@@ -1318,9 +2318,14 @@ export function AssetRegistrationModal({
 }) {
   const [draft, setDraft] = useState<AssetDraft>({
     name: "",
-    category: assetType === "hardware" ? policySettings.hardwareCategories[0] ?? "노트북" : policySettings.softwareCategories[0] ?? "OS",
+    category: assetType === "hardware" ? policySettings.hardwareCategories[0] ?? "모니터" : policySettings.softwareCategories[0] ?? "OS",
+    status: assetType === "hardware" ? "유휴" : "운영",
     unitPrice: 0,
+    acquiredAt: "",
+    totalQuantity: 1,
+    availableQuantity: 1,
     quantity: 1,
+    note: "",
   });
 
   useEffect(() => {
@@ -1328,9 +2333,14 @@ export function AssetRegistrationModal({
 
     setDraft({
       name: "",
-      category: assetType === "hardware" ? policySettings.hardwareCategories[0] ?? "노트북" : policySettings.softwareCategories[0] ?? "OS",
+      category: assetType === "hardware" ? policySettings.hardwareCategories[0] ?? "모니터" : policySettings.softwareCategories[0] ?? "OS",
+      status: assetType === "hardware" ? "유휴" : "운영",
       unitPrice: 0,
+      acquiredAt: "",
+      totalQuantity: 1,
+      availableQuantity: 1,
       quantity: 1,
+      note: "",
     });
   }, [assetType, open, policySettings]);
 
@@ -1344,8 +2354,13 @@ export function AssetRegistrationModal({
       {
         name: trimmedName,
         category: draft.category,
+        status: draft.status,
         unitPrice: draft.unitPrice,
+        acquiredAt: draft.acquiredAt || undefined,
+        totalQuantity: draft.totalQuantity,
+        availableQuantity: draft.availableQuantity,
         quantity: draft.quantity,
+        note: draft.note?.trim() || undefined,
       },
       assetType
     );
@@ -1393,7 +2408,18 @@ export function AssetRegistrationModal({
             />
           </FormRow>
 
-          <FormRow label="수량">
+          {assetType === "hardware" && (
+            <FormRow label="도입일">
+              <Input
+                type="date"
+                className="h-11 rounded-[10px]"
+                value={draft.acquiredAt ?? ""}
+                onChange={(event) => setDraft((prev) => ({ ...prev, acquiredAt: event.target.value }))}
+              />
+            </FormRow>
+          )}
+
+          <FormRow label={assetType === "hardware" ? "수량" : "전체 수량"}>
             <Input
               type="number"
               min={1}
@@ -1415,6 +2441,14 @@ export function AssetRegistrationModal({
                 : policySettings.softwareCategories.map((category) => <option key={category}>{category}</option>)}
             </select>
           </FormRow>
+
+          {assetType === "hardware" && (
+            <div className="rounded-[10px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              하드웨어 감가 금액은 사용 연한 5년 기준으로 계산됩니다. 도입일 또는 도입가가 없으면 목록에
+              <span className="ml-1 font-medium text-rose-600">도입일 및 도입가 필요</span>
+              로 표시됩니다.
+            </div>
+          )}
 
           <div className="min-h-[316px] space-y-3">
             {assetType === "hardware" ? (
@@ -1467,18 +2501,90 @@ export function AssetRegistrationModal({
   );
 }
 
-function FormRow({ label, children }: { label: string; children: ReactNode }) {
+function FormRow({ label, children, stacked = false }: { label: string; children: ReactNode; stacked?: boolean }) {
   return (
-    <div className="grid items-center gap-3 md:grid-cols-[140px_minmax(0,1fr)]">
-      <label className="text-sm font-medium text-slate-700">{label}</label>
+    <div className={stacked ? "space-y-1.5 bg-white p-3" : "grid items-center gap-3 grid-cols-[120px_minmax(0,1fr)] bg-white p-3 md:grid-cols-[140px_minmax(0,1fr)]"}>
+      <label className={stacked ? "text-sm font-semibold text-slate-800" : "text-sm font-medium text-slate-700"}>{label}</label>
       <div>{children}</div>
     </div>
   );
 }
 
-function usePagedData<T>(data: readonly T[]) {
+type PairRow = {
+  key: string;
+  label: string;
+  input: ReactNode;
+  sample: string;
+};
+
+function PairedFormGrid({ description, rows }: { description: string; rows: PairRow[] }) {
+  return (
+    <div className="space-y-2">
+      <div className="grid w-full gap-2 lg:grid-cols-2">
+        <div className="overflow-hidden rounded-[8px] border border-slate-200">
+          <div className="grid gap-px bg-slate-200">
+            <RegistrationHeaderRow description="실제 입력값입니다. 왼쪽에서 등록하거나 할당할 값을 입력합니다." />
+            {rows.map((row) => (
+              <RegistrationRow key={row.key} label={row.label}>
+                {row.input}
+              </RegistrationRow>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-[12px] border border-slate-900 bg-slate-900 p-2 shadow-sm">
+          <div className="overflow-hidden rounded-[10px] border border-slate-700 bg-white">
+            <div className="grid gap-px bg-slate-200">
+              <SampleHeaderRow description={description} />
+              {rows.map((row) => (
+                <ExampleRow key={row.key} label={row.label} value={row.sample} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RegistrationHeaderRow({ description }: { description: string }) {
+  return (
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-px bg-slate-200">
+      <div className="bg-slate-900 px-2.5 pt-1.5 pb-1 text-center text-sm font-semibold whitespace-nowrap text-slate-100">INPUT</div>
+      <div className="bg-slate-50 px-2.5 pt-1.5 pb-1 text-left text-xs leading-4 text-slate-600">{description}</div>
+    </div>
+  );
+}
+
+function SampleHeaderRow({ description }: { description: string }) {
+  return (
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-px bg-slate-700">
+      <div className="bg-slate-900 px-2.5 pt-1.5 pb-1 text-center text-sm font-semibold whitespace-nowrap text-slate-100">SAMPLE</div>
+      <div className="bg-slate-900 px-2.5 pt-1.5 pb-1 text-left text-xs leading-4 text-slate-300">{description}</div>
+    </div>
+  );
+}
+
+function ExampleRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-px bg-slate-200">
+      <div className="flex min-h-[30px] items-center justify-center bg-slate-50 px-2.5 py-1 text-center text-sm font-semibold whitespace-nowrap text-slate-700">{label}</div>
+      <div className="flex min-h-[30px] items-center bg-white px-2.5 py-1 text-sm font-medium leading-5 text-rose-600">{value}</div>
+    </div>
+  );
+}
+
+function RegistrationRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-px bg-slate-200">
+      <div className="flex items-center justify-center bg-slate-50 px-2.5 py-1 text-center text-sm font-semibold whitespace-nowrap text-slate-700">{label}</div>
+      <div className="flex min-h-[30px] items-center bg-white px-2.5 py-1 text-sm">{children}</div>
+    </div>
+  );
+}
+
+function usePagedData<T>(data: readonly T[], pageSize: number = TABLE_PAGE_SIZE) {
   const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(data.length / TABLE_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -1488,8 +2594,8 @@ function usePagedData<T>(data: readonly T[]) {
     setCurrentPage(1);
   }, [data.length]);
 
-  const startIndex = (currentPage - 1) * TABLE_PAGE_SIZE;
-  const pageItems = data.slice(startIndex, startIndex + TABLE_PAGE_SIZE);
+  const startIndex = (currentPage - 1) * pageSize;
+  const pageItems = data.slice(startIndex, startIndex + pageSize);
 
   return { pageItems, currentPage, totalPages, setCurrentPage };
 }
@@ -1516,7 +2622,7 @@ function TablePagination({
             key={page}
             type="button"
             onClick={() => onPageChange(page)}
-            className={`flex h-8 min-w-8 items-center justify-center rounded-[10px] px-2 text-xs ${
+            className={`flex h-9 min-w-9 items-center justify-center rounded-[10px] px-3 text-sm ${
               active ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
@@ -1530,11 +2636,56 @@ function TablePagination({
 
 function AutoFitText({ value }: { value: string | number }) {
   const text = String(value);
-  const textSizeClass = text.length > 24 ? "text-[11px]" : text.length > 14 ? "text-xs" : "text-sm";
 
   return (
-    <span title={text} className={`block truncate leading-4 ${textSizeClass}`}>
+    <span title={text} className="block truncate whitespace-nowrap text-[12px] leading-[18px]">
       {text}
+    </span>
+  );
+}
+
+function ExpiryDateText({ value }: { value?: string }) {
+  const text = value || "-";
+  const isNearExpiry = (() => {
+    if (!value) return false;
+    const expiry = new Date(value);
+    if (Number.isNaN(expiry.getTime())) return false;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const threshold = new Date(today);
+    threshold.setMonth(threshold.getMonth() + 1);
+
+    return expiry >= today && expiry <= threshold;
+  })();
+
+  return (
+    <span
+      title={text}
+      className={`block truncate whitespace-nowrap text-[12px] leading-[18px] ${isNearExpiry ? "font-bold text-red-600" : ""}`}
+    >
+      {text}
+    </span>
+  );
+}
+
+function ExpiredStatusText({ expired }: { expired: boolean }) {
+  return (
+    <span
+      className={`block truncate whitespace-nowrap text-[12px] leading-[18px] ${expired ? "font-bold text-red-600" : ""}`}
+    >
+      {expired ? "예" : "-"}
+    </span>
+  );
+}
+
+function ExpiredCountText({ value }: { value: number }) {
+  const expired = value > 0;
+  return (
+    <span
+      className={`block truncate whitespace-nowrap text-[12px] leading-[18px] ${expired ? "font-bold text-red-600" : ""}`}
+    >
+      {String(value)}
     </span>
   );
 }

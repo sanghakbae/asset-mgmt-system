@@ -33,7 +33,7 @@ function getOrgMemberKey(row: {
 
 function mapOrgMemberRow(row: OrgMemberRow, index: number): OrgMember {
   return {
-    id: index + 1,
+    id: row.id,
     name: row.name,
     position: row.position,
     category: row.category,
@@ -120,4 +120,27 @@ export async function importOrgMembersBulk(rows: ImportedOrgMemberRow[]): Promis
   return [...existingMap.values(), ...insertedRows]
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
     .map(mapOrgMemberRow);
+}
+
+export async function updateOrgMember(member: OrgMember): Promise<OrgMember> {
+  if (!supabase) throw new Error("Supabase is not configured");
+
+  const { data, error } = await supabase
+    .from("asset_org_members")
+    .update({
+      name: member.name,
+      position: member.position,
+      category: member.category,
+      cell: member.cell,
+      unit: member.unit,
+      part: member.part,
+      location: member.location,
+    })
+    .eq("id", member.id)
+    .select("id, name, position, category, cell, unit, part, location, created_at")
+    .single();
+
+  if (error) throw error;
+
+  return mapOrgMemberRow(data, 0);
 }
