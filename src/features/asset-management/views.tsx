@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import type { GoogleWorkspaceLicense, GoogleWorkspaceLicenseRun } from "@/services/google-workspace-licenses";
 import { menuItems, settingMenus } from "./data";
 import {
   canAccessSettingsMenu,
@@ -169,58 +170,121 @@ export function Sidebar({
   const visibleSettingMenus = settingMenus.filter((item) => canAccessSettingsMenu(user.role, item.key));
 
   return (
-    <aside className="flex w-full flex-col border-b border-slate-200 bg-[#eef2f7] shadow-[inset_0_-1px_0_rgba(148,163,184,0.18)] transition-all duration-200 lg:min-h-screen lg:border-b-0 lg:border-r lg:shadow-[inset_-1px_0_0_rgba(148,163,184,0.18)]">
-      <div className="border-b border-slate-200 bg-white/70 p-4 backdrop-blur">
-        {isSidebarCollapsed ? (
-          <div className="flex justify-center">
-            <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-[10px]" onClick={onToggleSidebar}>
-              <PanelLeftOpen className="h-5 w-5" />
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-slate-900 text-white">
-                <Shield className="h-5 w-5" />
-              </div>
-              <h1 className="text-lg font-semibold">자산 관리 시스템</h1>
+    <>
+      <aside className="hidden w-full flex-col border-b border-slate-200 bg-[#eef2f7] shadow-[inset_0_-1px_0_rgba(148,163,184,0.18)] transition-all duration-200 lg:flex lg:min-h-screen lg:border-b-0 lg:border-r lg:shadow-[inset_-1px_0_0_rgba(148,163,184,0.18)]">
+        <div className="border-b border-slate-200 bg-white/70 p-4 backdrop-blur">
+          {isSidebarCollapsed ? (
+            <div className="flex justify-center">
+              <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-[10px]" onClick={onToggleSidebar}>
+                <PanelLeftOpen className="h-5 w-5" />
+              </Button>
             </div>
-            <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-[10px]" onClick={onToggleSidebar}>
-              <PanelLeftClose className="h-5 w-5" />
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <nav className="w-full p-3">
-        <div className="space-y-2">
-          {visibleMenuItems.map((item) => {
-            const Icon = item.icon;
-            const active = menu === item.key;
-
-            return (
-              <button
-                key={item.key}
-                onClick={() => onMenuSelect(item.key)}
-                className={`flex w-full items-center rounded-[10px] py-3 text-sm transition ${
-                  isSidebarCollapsed ? "justify-center px-0" : "justify-between px-4"
-                } ${active ? "bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-slate-200" : "text-slate-600 hover:bg-white/80 hover:shadow-[0_8px_18px_rgba(15,23,42,0.08)]"}`}
-                title={item.label}
-              >
-                <span className={`flex items-center ${isSidebarCollapsed ? "justify-center" : "gap-3"}`}>
-                  <Icon className="h-4 w-4" />
-                  {!isSidebarCollapsed && item.label}
-                </span>
-                {!isSidebarCollapsed && <ChevronRight className="h-4 w-4 opacity-60" />}
-              </button>
-            );
-          })}
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-slate-900 text-white">
+                  <Shield className="h-5 w-5" />
+                </div>
+                <h1 className="text-lg font-semibold">자산 관리 시스템</h1>
+              </div>
+              <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-[10px]" onClick={onToggleSidebar}>
+                <PanelLeftClose className="h-5 w-5" />
+              </Button>
+            </div>
+          )}
         </div>
 
-        {menu === "settings" && visibleSettingMenus.length > 0 && (
-          <div className={`mt-6 rounded-[14px] border border-slate-200 bg-white/75 shadow-[0_14px_30px_rgba(15,23,42,0.08)] backdrop-blur ${isSidebarCollapsed ? "p-1.5" : "p-2"}`}>
-            {!isSidebarCollapsed && <p className="px-2 py-2 text-xs font-medium text-slate-500">설정 메뉴</p>}
-            <div className="space-y-1">
+        <nav className="w-full p-3">
+          <div className="space-y-2">
+            {visibleMenuItems.map((item) => {
+              const Icon = item.icon;
+              const active = menu === item.key;
+
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => onMenuSelect(item.key)}
+                  className={`flex w-full items-center rounded-[10px] py-3 text-sm transition ${
+                    isSidebarCollapsed ? "justify-center px-0" : "justify-between px-4"
+                  } ${active ? "bg-white text-slate-900 shadow-[0_10px_24px_rgba(15,23,42,0.12)] ring-1 ring-slate-200" : "text-slate-600 hover:bg-white/80 hover:shadow-[0_8px_18px_rgba(15,23,42,0.08)]"}`}
+                  title={item.label}
+                >
+                  <span className={`flex items-center ${isSidebarCollapsed ? "justify-center" : "gap-3"}`}>
+                    <Icon className="h-4 w-4" />
+                    {!isSidebarCollapsed && item.label}
+                  </span>
+                  {!isSidebarCollapsed && <ChevronRight className="h-4 w-4 opacity-60" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {menu === "settings" && visibleSettingMenus.length > 0 && (
+            <div className={`mt-6 rounded-[14px] border border-slate-200 bg-white/75 shadow-[0_14px_30px_rgba(15,23,42,0.08)] backdrop-blur ${isSidebarCollapsed ? "p-1.5" : "p-2"}`}>
+              {!isSidebarCollapsed && <p className="px-2 py-2 text-xs font-medium text-slate-500">설정 메뉴</p>}
+              <div className="space-y-1">
+                {visibleSettingMenus.map((item) => {
+                  const Icon = item.icon;
+                  const active = settingsMenu === item.key;
+
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => onSettingsMenuSelect(item.key)}
+                      className={`flex w-full items-center rounded-[10px] text-sm transition ${
+                        isSidebarCollapsed ? "justify-center px-0 py-3" : "gap-3 px-3 py-2.5"
+                      } ${active ? "bg-slate-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+                      title={item.label}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {!isSidebarCollapsed && item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </nav>
+
+        {!isSidebarCollapsed && (
+          <div className="mt-auto space-y-4 p-4">
+            <Card className="rounded-[14px] border border-slate-200 bg-white/80 shadow-[0_16px_34px_rgba(15,23,42,0.08)] backdrop-blur">
+              <CardContent className="space-y-3 p-5">
+                <SidebarMetric label="하드웨어 할당" value={hardwareAssignedCount} />
+                <SidebarMetric label="소프트웨어 할당" value={softwareAssignedCount} />
+                <SidebarMetric label="구성원 수" value={orgMemberCount} />
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[14px] border border-slate-200 bg-white/80 shadow-[0_16px_34px_rgba(15,23,42,0.08)] backdrop-blur">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-slate-100 text-slate-700">
+                    <UserCircle2 className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{user.name}</p>
+                    <p className="truncate text-xs text-slate-500">{user.email}</p>
+                    <p className="mt-1 text-xs text-slate-500">{user.department}</p>
+                    <p className="mt-1 text-xs text-slate-500">세션 남은 시간 {sessionRemainingLabel}</p>
+                    <Button variant="outline" className="mt-2 h-6 rounded-[8px] px-2 py-0 text-[10px]" onClick={onExtendSession}>
+                      연장
+                    </Button>
+                  </div>
+                </div>
+                <Button variant="outline" className="mt-4 w-full rounded-[10px]" onClick={onLogout}>
+                  <LogOut className="mr-2 h-4 w-4" /> 로그아웃
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </aside>
+
+      {menu === "settings" && visibleSettingMenus.length > 0 && (
+        <div className="fixed inset-x-3 bottom-[88px] z-40 lg:hidden">
+          <div className="rounded-[18px] border border-slate-200 bg-white/95 p-2 shadow-[0_18px_40px_rgba(18,24,40,0.12)] backdrop-blur">
+            <div className="grid grid-cols-5 gap-1">
               {visibleSettingMenus.map((item) => {
                 const Icon = item.icon;
                 const active = settingsMenu === item.key;
@@ -228,56 +292,41 @@ export function Sidebar({
                 return (
                   <button
                     key={item.key}
+                    type="button"
                     onClick={() => onSettingsMenuSelect(item.key)}
-                    className={`flex w-full items-center rounded-[10px] text-sm transition ${
-                      isSidebarCollapsed ? "justify-center px-0 py-3" : "gap-3 px-3 py-2.5"
-                    } ${active ? "bg-slate-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+                    className={`flex h-12 items-center justify-center rounded-[14px] transition ${active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100"}`}
                     title={item.label}
                   >
-                    <Icon className="h-4 w-4" />
-                    {!isSidebarCollapsed && item.label}
+                    <Icon className="h-5 w-5" />
                   </button>
                 );
               })}
             </div>
           </div>
-        )}
-      </nav>
-
-      {!isSidebarCollapsed && (
-        <div className="mt-auto space-y-4 p-4">
-          <Card className="rounded-[14px] border border-slate-200 bg-white/80 shadow-[0_16px_34px_rgba(15,23,42,0.08)] backdrop-blur">
-            <CardContent className="space-y-3 p-5">
-              <SidebarMetric label="하드웨어 할당" value={hardwareAssignedCount} />
-              <SidebarMetric label="소프트웨어 할당" value={softwareAssignedCount} />
-              <SidebarMetric label="구성원 수" value={orgMemberCount} />
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-[14px] border border-slate-200 bg-white/80 shadow-[0_16px_34px_rgba(15,23,42,0.08)] backdrop-blur">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-slate-100 text-slate-700">
-                  <UserCircle2 className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{user.name}</p>
-                  <p className="truncate text-xs text-slate-500">{user.email}</p>
-                  <p className="mt-1 text-xs text-slate-500">{user.department}</p>
-                  <p className="mt-1 text-xs text-slate-500">세션 남은 시간 {sessionRemainingLabel}</p>
-                  <Button variant="outline" className="mt-2 h-6 rounded-[8px] px-2 py-0 text-[10px]" onClick={onExtendSession}>
-                    연장
-                  </Button>
-                </div>
-              </div>
-              <Button variant="outline" className="mt-4 w-full rounded-[10px]" onClick={onLogout}>
-                <LogOut className="mr-2 h-4 w-4" /> 로그아웃
-              </Button>
-            </CardContent>
-          </Card>
         </div>
       )}
-    </aside>
+
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-3 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.12)] backdrop-blur lg:hidden">
+        <div className="grid grid-cols-6 gap-1">
+          {visibleMenuItems.map((item) => {
+            const Icon = item.icon;
+            const active = menu === item.key;
+
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onMenuSelect(item.key)}
+                className={`flex h-14 items-center justify-center rounded-[16px] transition ${active ? "bg-slate-900 text-white shadow-[0_10px_24px_rgba(15,23,42,0.18)]" : "text-slate-500 hover:bg-slate-100"}`}
+                title={item.label}
+              >
+                <Icon className="h-6 w-6" />
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    </>
   );
 }
 
@@ -302,6 +351,7 @@ type PageHeaderProps = {
 export function PageHeader({ menu, settingsMenu, search, onSearchChange, onCreateAsset, currentUserRole }: PageHeaderProps) {
   const showSearch =
     menu === "dashboard" || menu === "hardware" || menu === "usage" || (menu === "settings" && settingsMenu !== "security");
+  const isUsagePage = menu === "usage";
 
   return (
     <div className="w-full rounded-[14px] border border-slate-700 bg-slate-800 px-3 py-3 sm:px-4 shadow-[0_12px_28px_rgba(15,23,42,0.2)]">
@@ -313,10 +363,10 @@ export function PageHeader({ menu, settingsMenu, search, onSearchChange, onCreat
 
         {showSearch && (
           <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:justify-end lg:w-auto">
-            <div className="relative w-full sm:min-w-[224px] sm:flex-1 lg:w-auto lg:min-w-[224px]">
+            <div className={`relative w-full sm:flex-1 lg:w-auto ${isUsagePage ? "sm:min-w-[320px] lg:min-w-[420px]" : "sm:min-w-[224px] lg:min-w-[224px]"}`}>
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <Input
-                className="h-10 rounded-[10px] border-white/20 bg-white pl-10 text-sm"
+                className={`h-10 rounded-[10px] border-white/20 bg-white pl-10 ${isUsagePage ? "text-xs" : "text-sm"}`}
                 placeholder={getSearchPlaceholder(menu, settingsMenu)}
                 value={search}
                 onChange={(event) => onSearchChange(event.target.value)}
@@ -339,6 +389,7 @@ export function UserRegistrationForm({
   assets,
   hardwareAssignments,
   softwareAssignments,
+  orgMembers,
   policySettings,
   onImportExcel,
   onExportExcel,
@@ -347,19 +398,18 @@ export function UserRegistrationForm({
     name: string;
     department: string;
     assetId: string;
-    os?: string;
-    macAddress?: string;
-    ipAddress?: string;
   }) => void;
   assets: Asset[];
   hardwareAssignments: HardwareAssignment[];
   softwareAssignments: SoftwareAssignment[];
+  orgMembers: OrgMember[];
   policySettings: AssetPolicySettings;
   onImportExcel: (rows: ImportedAssetRow[]) => Promise<void>;
   onExportExcel: () => void;
 }) {
   const normalizedHardwareCategoryOptions =
     policySettings.hardwareCategories.length > 0 ? policySettings.hardwareCategories : ["모니터", "랩탑", "데스크탑"];
+  const monitorVendorOptions = ["LG", "벤큐", "Dell", "Apple"] as const;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [form, setForm] = useState({
@@ -367,20 +417,30 @@ export function UserRegistrationForm({
     department: "",
     assetType: "hardware" as AssetType,
     hardwareCategory: normalizedHardwareCategoryOptions[0],
+    hardwareVendor: "",
     assetId: "",
-    os: "",
-    macAddress: "",
-    ipAddress: "",
   });
+  const resolveDepartmentByName = (name: string) => {
+    const normalizedName = name.trim();
+    if (!normalizedName) return "";
+
+    const orgMember = orgMembers.find((member) => member.name.trim() === normalizedName);
+    if (orgMember?.unit?.trim()) return orgMember.unit.trim();
+    return "";
+  };
+  const isMonitorCategory = form.assetType === "hardware" && form.hardwareCategory === "모니터";
 
   const selectableAssets = assets.filter((asset) =>
     form.assetType === "hardware"
-      ? asset.type === "hardware" && asset.category === form.hardwareCategory && (asset.quantity ?? 0) > 0
+      ? asset.type === "hardware" &&
+        asset.category === form.hardwareCategory &&
+        (asset.quantity ?? 0) > 0 &&
+        (!isMonitorCategory || !form.hardwareVendor || asset.vendor === form.hardwareVendor)
       : asset.type === "software" && (asset.quantity ?? 0) > 0
   );
   const getSelectableAssetLabel = (asset: Asset) =>
     asset.type === "hardware"
-      ? `${asset.category} (${asset.quantity ?? 0}대 남음)`
+      ? `${asset.name || asset.category}${asset.vendor ? ` / ${asset.vendor}` : ""} (${asset.quantity ?? 0}대 남음)`
       : `${asset.softwareName || asset.name || asset.id} (${asset.quantity ?? 0}석 남음)`;
 
   useEffect(() => {
@@ -395,61 +455,50 @@ export function UserRegistrationForm({
       department: "",
       assetType: "hardware",
       hardwareCategory: normalizedHardwareCategoryOptions[0],
+      hardwareVendor: "",
       assetId: "",
-      os: "",
-      macAddress: "",
-      ipAddress: "",
     });
 
   const selectedAsset = selectableAssets.find((asset) => asset.id === form.assetId);
-  const needsHardwareNetworkFields =
-    form.assetType === "hardware" && (form.hardwareCategory === "랩탑" || form.hardwareCategory === "데스크탑");
   const hardwareExampleAssetName =
     form.hardwareCategory === "모니터" ? "MON-2207" : form.hardwareCategory === "데스크탑" ? "DST-0118" : "LAP-0142";
-  const hardwareExampleOs = form.hardwareCategory === "데스크탑" ? "Windows 11 Enterprise" : "Windows 11 Pro";
-  const hardwareExampleMac = form.hardwareCategory === "데스크탑" ? "D1:E2:F3:A4:B5:C6" : "A1:B2:C3:D4:E5:F6";
-  const hardwareExampleIp = form.hardwareCategory === "데스크탑" ? "10.10.2.118" : "10.10.1.142";
-  const assignedRows = useMemo(
-    () => [
-      ...hardwareAssignments.map((assignment) => ({
+  const recentHardwareAssignedRows = useMemo(
+    () =>
+      hardwareAssignments
+        .map((assignment) => ({
           key: `hardware-${assignment.id}`,
           userName: assignment.userName,
           department: assignment.department ?? "-",
-          assetType: "하드웨어",
           assetName: assignment.pcName || assignment.assetCode,
           quantity: "1",
           assignedAt: assignment.assignedAt ? assignment.assignedAt.slice(0, 19).replace("T", " ") : "-",
-        })),
-      ...softwareAssignments.map((assignment) => ({
-        key: `software-${assignment.id}`,
-        userName: assignment.userName,
-        department: assignment.department || "-",
-        assetType: "소프트웨어",
-        assetName: assignment.softwareName,
-        quantity: `${assignment.assignedSeats}`,
-        assignedAt: assignment.assignedAt.slice(0, 19).replace("T", " "),
-      })),
-    ],
-    [hardwareAssignments, softwareAssignments]
-  );
-  const recentAssignedRows = useMemo(
-    () =>
-      [...assignedRows]
+        }))
         .sort((a, b) => b.assignedAt.localeCompare(a.assignedAt))
         .slice(0, 10),
-    [assignedRows]
+    [hardwareAssignments]
+  );
+  const recentSoftwareAssignedRows = useMemo(
+    () =>
+      softwareAssignments
+        .map((assignment) => ({
+          key: `software-${assignment.id}`,
+          userName: assignment.userName,
+          department: assignment.department || "-",
+          assetName: assignment.softwareName,
+          quantity: `${assignment.assignedSeats}`,
+          assignedAt: assignment.assignedAt.slice(0, 19).replace("T", " "),
+        }))
+        .sort((a, b) => b.assignedAt.localeCompare(a.assignedAt))
+        .slice(0, 10),
+    [softwareAssignments]
   );
 
   const handleSubmit = () => {
     if (!form.name.trim() || !form.department.trim() || !selectedAsset) return;
-    if (needsHardwareNetworkFields && (!form.os.trim() || !form.macAddress.trim() || !form.ipAddress.trim())) return;
     onRegister({
       name: form.name.trim(),
       department: form.department.trim(),
       assetId: form.assetId,
-      os: needsHardwareNetworkFields ? form.os.trim() : undefined,
-      macAddress: needsHardwareNetworkFields ? form.macAddress.trim() : undefined,
-      ipAddress: needsHardwareNetworkFields ? form.ipAddress.trim() : undefined,
     });
     reset();
   };
@@ -478,20 +527,25 @@ export function UserRegistrationForm({
           placeholder="예: 홍길동"
           className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
           value={form.name}
-          onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+          onChange={(event) =>
+            setForm((prev) => {
+              const name = event.target.value;
+              return { ...prev, name, department: resolveDepartmentByName(name) };
+            })
+          }
         />
       ),
       sample: "홍길동",
     },
     {
       key: "department",
-      label: "소속부서",
+      label: "소속 유닛",
       input: (
         <Input
-          placeholder="예: 인프라팀"
+          placeholder="이름 입력 시 자동 입력"
           className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
           value={form.department}
-          onChange={(event) => setForm((prev) => ({ ...prev, department: event.target.value }))}
+          readOnly
         />
       ),
       sample: "인프라팀",
@@ -508,10 +562,8 @@ export function UserRegistrationForm({
               ...prev,
               assetType: event.target.value as AssetType,
               hardwareCategory: normalizedHardwareCategoryOptions[0],
+              hardwareVendor: "",
               assetId: "",
-              os: "",
-              macAddress: "",
-              ipAddress: "",
             }))
           }
         >
@@ -535,10 +587,8 @@ export function UserRegistrationForm({
             setForm((prev) => ({
               ...prev,
               hardwareCategory: event.target.value,
+              hardwareVendor: "",
               assetId: "",
-              os: "",
-              macAddress: "",
-              ipAddress: "",
             }))
           }
         >
@@ -550,6 +600,28 @@ export function UserRegistrationForm({
         </select>
       ),
       sample: form.hardwareCategory,
+    });
+  }
+
+  if (isMonitorCategory) {
+    assignmentRows.push({
+      key: "hardwareVendor",
+      label: "밴더",
+      input: (
+        <select
+          className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+          value={form.hardwareVendor}
+          onChange={(event) => setForm((prev) => ({ ...prev, hardwareVendor: event.target.value, assetId: "" }))}
+        >
+          <option value="">밴더를 선택하세요</option>
+          {monitorVendorOptions.map((vendor) => (
+            <option key={vendor} value={vendor}>
+              {vendor}
+            </option>
+          ))}
+        </select>
+      ),
+      sample: "LG",
     });
   }
 
@@ -573,46 +645,17 @@ export function UserRegistrationForm({
     sample: form.assetType === "hardware" ? hardwareExampleAssetName : "Burp Suite Pro (14석 남음)",
   });
 
-  if (needsHardwareNetworkFields) {
+  if (form.assetType === "hardware") {
     assignmentRows.push(
       {
-        key: "os",
-        label: "OS 정보",
+        key: "vendor",
+        label: "밴더 정보",
         input: (
-          <Input
-            placeholder="예: Windows 11 Pro"
-            className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
-            value={form.os}
-            onChange={(event) => setForm((prev) => ({ ...prev, os: event.target.value }))}
-          />
+          <div className="flex h-8 items-center rounded-[8px] border border-slate-200 bg-slate-50 px-2 text-xs text-slate-600">
+            {selectedAsset?.vendor?.trim() || "-"}
+          </div>
         ),
-        sample: hardwareExampleOs,
-      },
-      {
-        key: "macAddress",
-        label: "MAC Address",
-        input: (
-          <Input
-            placeholder="예: A1:B2:C3:D4:E5:F6"
-            className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
-            value={form.macAddress}
-            onChange={(event) => setForm((prev) => ({ ...prev, macAddress: event.target.value }))}
-          />
-        ),
-        sample: hardwareExampleMac,
-      },
-      {
-        key: "ipAddress",
-        label: "IP Address",
-        input: (
-          <Input
-            placeholder="예: 10.10.1.142"
-            className="h-8 rounded-[8px] border-slate-200 px-2 text-xs"
-            value={form.ipAddress}
-            onChange={(event) => setForm((prev) => ({ ...prev, ipAddress: event.target.value }))}
-          />
-        ),
-        sample: hardwareExampleIp,
+        sample: form.hardwareCategory === "모니터" ? "LG" : form.hardwareCategory === "데스크탑" ? "Dell" : "HP",
       }
     );
   }
@@ -648,7 +691,7 @@ export function UserRegistrationForm({
       label: "할당 대상 장비",
       input: (
         <div className="flex h-8 items-center rounded-[8px] border border-slate-200 bg-slate-50 px-2 text-xs text-slate-600">
-          {selectedAsset ? `${selectedAsset.category} / ${selectedAsset.id}` : "-"}
+          {selectedAsset ? `${selectedAsset.name || selectedAsset.category}${selectedAsset.vendor ? ` / ${selectedAsset.vendor}` : ""}` : "-"}
         </div>
       ),
       sample: hardwareExampleAssetName,
@@ -683,24 +726,21 @@ export function UserRegistrationForm({
       </Card>
 
       <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
-        <CardContent className="space-y-3 p-2.5">
+        <CardContent className="flex h-[560px] flex-col space-y-3 p-2.5">
           <div className="rounded-[8px] border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm leading-6 text-slate-700">
             실제 보유 중인 자산만 선택해서 사용자에게 할당합니다.
           </div>
-          <PairedFormGrid
-            description="실제 할당 예시입니다. 보유 자산 중 선택 가능한 항목만 사용자에게 할당합니다."
-            rows={assignmentRows}
-          />
-          <div className="flex justify-end">
+          <div className="flex-1 overflow-hidden">
+            <PairedFormGrid
+              description="실제 할당 예시입니다. 보유 자산 중 선택 가능한 항목만 사용자에게 할당합니다."
+              rows={assignmentRows}
+            />
+          </div>
+          <div className="flex justify-end pt-2">
             <Button
               className="h-8 rounded-[8px] px-3 text-xs"
               onClick={handleSubmit}
-              disabled={
-                !form.name ||
-                !form.department ||
-                !selectedAsset ||
-                (needsHardwareNetworkFields && (!form.os.trim() || !form.macAddress.trim() || !form.ipAddress.trim()))
-              }
+              disabled={!form.name || !form.department || !selectedAsset}
             >
               자산 사용자 등록
             </Button>
@@ -708,47 +748,87 @@ export function UserRegistrationForm({
         </CardContent>
       </Card>
 
-      <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
-        <CardContent className="p-3">
-          <div className="mb-3">
-            <h3 className="text-base font-semibold text-slate-900">현재 자산 할당 현황</h3>
-            <p className="mt-1 text-sm text-slate-500">실제 자산에 할당된 사용자 목록을 조회합니다.</p>
-          </div>
-          <div className="overflow-hidden rounded-[10px] border border-slate-200">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="w-[120px] text-center">사용자</TableHead>
-                  <TableHead className="w-[120px] text-center">부서</TableHead>
-                  <TableHead className="w-[100px] text-center">자산 유형</TableHead>
-                  <TableHead className="text-center">자산명</TableHead>
-                  <TableHead className="w-[90px] text-center">수량</TableHead>
-                  <TableHead className="w-[180px] text-center">할당 일시</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentAssignedRows.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-6 text-center text-sm text-slate-500">
-                      현재 할당된 자산이 없습니다.
-                    </TableCell>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card className="h-full rounded-[10px] border-slate-200 bg-white shadow-sm">
+          <CardContent className="flex min-h-[420px] flex-col p-3">
+            <div className="mb-3">
+              <h3 className="text-base font-semibold text-slate-900">현재 하드웨어 할당 현황</h3>
+              <p className="mt-1 text-sm text-slate-500">최근 등록된 하드웨어 할당 10건입니다.</p>
+            </div>
+            <div className="flex-1 overflow-hidden rounded-[10px] border border-slate-200">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="w-[120px] text-center">사용자</TableHead>
+                    <TableHead className="w-[120px] text-center">소속 유닛</TableHead>
+                    <TableHead className="text-center">자산명</TableHead>
+                    <TableHead className="w-[90px] text-center">수량</TableHead>
+                    <TableHead className="w-[180px] text-center">할당 일시</TableHead>
                   </TableRow>
-                )}
-                {recentAssignedRows.map((row) => (
-                  <TableRow key={row.key} className="hover:bg-slate-50/80">
-                    <TableCell className="text-center"><AutoFitText value={row.userName} /></TableCell>
-                    <TableCell className="text-center"><AutoFitText value={row.department} /></TableCell>
-                    <TableCell className="text-center"><AutoFitText value={row.assetType} /></TableCell>
-                    <TableCell className="text-center"><AutoFitText value={row.assetName} /></TableCell>
-                    <TableCell className="text-center"><AutoFitText value={row.quantity} /></TableCell>
-                    <TableCell className="text-center"><AutoFitText value={row.assignedAt} /></TableCell>
+                </TableHeader>
+                <TableBody>
+                  {recentHardwareAssignedRows.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
+                        현재 할당된 하드웨어가 없습니다.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {recentHardwareAssignedRows.map((row) => (
+                    <TableRow key={row.key} className="hover:bg-slate-50/80">
+                      <TableCell className="text-center"><AutoFitText value={row.userName} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.department} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.assetName} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.quantity} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.assignedAt} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="h-full rounded-[10px] border-slate-200 bg-white shadow-sm">
+          <CardContent className="flex min-h-[420px] flex-col p-3">
+            <div className="mb-3">
+              <h3 className="text-base font-semibold text-slate-900">현재 소프트웨어 할당 현황</h3>
+              <p className="mt-1 text-sm text-slate-500">최근 등록된 소프트웨어 할당 10건입니다.</p>
+            </div>
+            <div className="flex-1 overflow-hidden rounded-[10px] border border-slate-200">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50 hover:bg-slate-50">
+                    <TableHead className="w-[120px] text-center">사용자</TableHead>
+                    <TableHead className="w-[120px] text-center">소속 유닛</TableHead>
+                    <TableHead className="text-center">자산명</TableHead>
+                    <TableHead className="w-[90px] text-center">수량</TableHead>
+                    <TableHead className="w-[180px] text-center">할당 일시</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                </TableHeader>
+                <TableBody>
+                  {recentSoftwareAssignedRows.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
+                        현재 할당된 소프트웨어가 없습니다.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {recentSoftwareAssignedRows.map((row) => (
+                    <TableRow key={row.key} className="hover:bg-slate-50/80">
+                      <TableCell className="text-center"><AutoFitText value={row.userName} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.department} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.assetName} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.quantity} /></TableCell>
+                      <TableCell className="text-center"><AutoFitText value={row.assignedAt} /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
     </div>
   );
@@ -770,6 +850,7 @@ export function AssetRegistrationForm({
   policySettings: AssetPolicySettings;
 }) {
   const hardwareCategoryOptions = ["모니터", "랩탑", "데스크탑"] as const;
+  const laptopVendorOptions = ["HP", "삼성", "LG", "Apple"] as const;
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [draft, setDraft] = useState<AssetDraft>({
     name: "",
@@ -790,8 +871,8 @@ export function AssetRegistrationForm({
     ipAddress: "",
     note: "",
   });
-  const requiresHardwareOs = assetType === "hardware" && (draft.category === "랩탑" || draft.category === "데스크탑");
   const requiresHardwareVendor = assetType === "hardware";
+  const usesLaptopVendorSelect = assetType === "hardware" && draft.category === "랩탑";
   useEffect(() => {
     setDraft({
       name: "",
@@ -815,15 +896,16 @@ export function AssetRegistrationForm({
   }, [assetType, policySettings]);
 
   const handleSave = () => {
-    const trimmedSoftwareName = draft.name.trim();
-    if (assetType === "software" && !trimmedSoftwareName) return;
+    const trimmedName = draft.name.trim();
+    if (!trimmedName) return;
+    if (requiresHardwareVendor && !draft.vendor?.trim()) return;
     onSave(
       {
         ...draft,
-        name: "",
-        softwareName: assetType === "software" ? trimmedSoftwareName : undefined,
+        name: assetType === "hardware" ? trimmedName : "",
+        softwareName: assetType === "software" ? trimmedName : undefined,
         pcName: undefined,
-        os: requiresHardwareOs ? draft.os?.trim() || undefined : undefined,
+        os: undefined,
         vendor: requiresHardwareVendor ? draft.vendor?.trim() || undefined : undefined,
         macAddress: undefined,
         ipAddress: undefined,
@@ -856,6 +938,22 @@ export function AssetRegistrationForm({
     },
   ];
 
+  if (assetType === "hardware") {
+    registrationRows.push({
+      key: "hardwareName",
+      label: "자산명",
+      input: (
+        <Input
+          placeholder="예: 27인치 4K 모니터"
+          className="h-8 border-slate-200 px-2 text-xs"
+          value={draft.name}
+          onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
+        />
+      ),
+      sample: "27인치 4K 모니터",
+    });
+  }
+
   if (assetType === "software") {
     registrationRows.push({
       key: "softwareName",
@@ -879,7 +977,16 @@ export function AssetRegistrationForm({
       <select
         className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
         value={draft.category}
-        onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
+        onChange={(event) =>
+          setDraft((prev) => {
+            const nextCategory = event.target.value;
+            const nextVendor =
+              nextCategory === "랩탑" && !laptopVendorOptions.includes((prev.vendor ?? "") as (typeof laptopVendorOptions)[number])
+                ? laptopVendorOptions[0]
+                : prev.vendor;
+            return { ...prev, category: nextCategory, vendor: nextVendor };
+          })
+        }
       >
         {assetType === "hardware"
           ? hardwareCategoryOptions.map((category) => <option key={category}>{category}</option>)
@@ -932,27 +1039,23 @@ export function AssetRegistrationForm({
   });
 
   if (assetType === "hardware") {
-    if (requiresHardwareOs) {
-      registrationRows.push({
-        key: "os",
-        label: "OS 정보",
-        input: (
-          <Input
-            placeholder="예: Windows 11 Pro"
-            className="h-8 border-slate-200 px-2 text-xs"
-            value={draft.os ?? ""}
-            onChange={(event) => setDraft((prev) => ({ ...prev, os: event.target.value }))}
-          />
-        ),
-        sample: draft.category === "데스크탑" ? "Windows 11 Enterprise" : "Windows 11 Pro",
-      });
-    }
-
     if (requiresHardwareVendor) {
       registrationRows.push({
         key: "vendor",
         label: "밴더",
-        input: (
+        input: usesLaptopVendorSelect ? (
+          <select
+            className="h-8 w-full rounded-[8px] border border-slate-200 bg-white px-2 text-xs outline-none"
+            value={draft.vendor ?? laptopVendorOptions[0]}
+            onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))}
+          >
+            {laptopVendorOptions.map((vendor) => (
+              <option key={vendor} value={vendor}>
+                {vendor}
+              </option>
+            ))}
+          </select>
+        ) : (
           <Input
             placeholder="예: Dell"
             className="h-8 border-slate-200 px-2 text-xs"
@@ -960,7 +1063,7 @@ export function AssetRegistrationForm({
             onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))}
           />
         ),
-        sample: draft.category === "모니터" ? "LG" : draft.category === "데스크탑" ? "Dell" : "Lenovo",
+        sample: draft.category === "모니터" ? "LG" : draft.category === "데스크탑" ? "Dell" : "HP",
       });
     }
 
@@ -1038,7 +1141,7 @@ export function AssetRegistrationForm({
             <Button
               className="h-8 rounded-[8px] px-3 text-xs"
               onClick={handleSave}
-              disabled={assetType === "hardware" ? (draft.quantity ?? 1) < 1 : !draft.name.trim()}
+              disabled={!draft.name.trim() || (assetType === "hardware" && ((draft.quantity ?? 1) < 1 || !draft.vendor?.trim()))}
             >
               자산 등록
             </Button>
@@ -1046,13 +1149,20 @@ export function AssetRegistrationForm({
         </CardContent>
       </Card>
 
-      <RegisteredAssetList
-        assetType={assetType}
-        assets={assets.filter((asset) => asset.type === assetType)}
-        selectedCategory={draft.category}
-        selectedSoftwareName={assetType === "software" ? draft.name.trim() : undefined}
-        onEdit={setEditingAsset}
-      />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <RegisteredAssetList
+          title="등록된 하드웨어 자산"
+          assetType="hardware"
+          assets={assets.filter((asset) => asset.type === "hardware")}
+          onEdit={setEditingAsset}
+        />
+        <RegisteredAssetList
+          title="등록된 소프트웨어 자산"
+          assetType="software"
+          assets={assets.filter((asset) => asset.type === "software")}
+          onEdit={setEditingAsset}
+        />
+      </div>
 
       {editingAsset && (
         <RegisteredAssetEditModal
@@ -1070,29 +1180,17 @@ export function AssetRegistrationForm({
 }
 
 function RegisteredAssetList({
+  title,
   assetType,
   assets,
-  selectedCategory,
-  selectedSoftwareName,
   onEdit,
 }: {
+  title: string;
   assetType: AssetType;
   assets: Asset[];
-  selectedCategory?: string;
-  selectedSoftwareName?: string;
   onEdit: (asset: Asset) => void;
 }) {
-  const filteredAssets =
-    assetType === "hardware"
-      ? selectedCategory
-        ? assets.filter((asset) => asset.category === selectedCategory)
-        : assets
-      : assets.filter((asset) => {
-          if (selectedSoftwareName) {
-            return (asset.softwareName ?? asset.name ?? "").trim() === selectedSoftwareName;
-          }
-          return selectedCategory ? asset.category === selectedCategory : true;
-        });
+  const filteredAssets = assets;
   const isHardwareExpired = (acquiredAt?: string) => {
     if (!acquiredAt) return false;
     const acquired = new Date(acquiredAt);
@@ -1104,26 +1202,15 @@ function RegisteredAssetList({
   const hardwareRows = useMemo(
     () => {
       if (filteredAssets.length === 0) return [];
-
-      const representative = filteredAssets[0];
-      const totalQuantity = filteredAssets.reduce((sum, asset) => sum + (asset.totalQuantity ?? asset.quantity ?? 0), 0);
-      const availableQuantity = filteredAssets.reduce((sum, asset) => sum + (asset.quantity ?? 0), 0);
-      const expiredCount = filteredAssets.reduce(
-        (sum, asset) => sum + (isHardwareExpired(asset.acquiredAt) ? asset.totalQuantity ?? asset.quantity ?? 0 : 0),
-        0
-      );
-
-      return [
-        {
-          key: selectedCategory ?? representative.category,
-          representative,
-          totalQuantity,
-          availableQuantity,
-          expiredCount,
-          isExpired: expiredCount > 0,
-          vendor: Array.from(new Set(filteredAssets.map((asset) => asset.vendor).filter(Boolean))).join(" / ") || "-",
-        },
-      ];
+      return filteredAssets.map((asset) => ({
+        key: asset.id,
+        representative: asset,
+        totalQuantity: asset.totalQuantity ?? asset.quantity ?? 0,
+        availableQuantity: asset.quantity ?? 0,
+        expiredCount: isHardwareExpired(asset.acquiredAt) ? asset.totalQuantity ?? asset.quantity ?? 0 : 0,
+        isExpired: isHardwareExpired(asset.acquiredAt),
+        vendor: asset.vendor || "-",
+      }));
     },
     [filteredAssets]
   );
@@ -1175,40 +1262,65 @@ function RegisteredAssetList({
     <Card className="rounded-[10px] border-slate-200 bg-white shadow-sm">
       <CardContent className="p-3">
         <div className="mb-3">
-          <h3 className="text-base font-semibold text-slate-900">{assetType === "hardware" ? "등록된 하드웨어 자산" : "등록된 소프트웨어 자산"}</h3>
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
           <p className="mt-1 text-sm text-slate-500">
             등록 단위로 묶어서 보여줍니다.
           </p>
         </div>
-        <div className="overflow-hidden rounded-[10px] border border-slate-200">
-          <Table>
+        <div className="min-h-[420px] overflow-hidden rounded-[10px] border border-slate-200">
+          <Table className="w-full table-fixed">
+            <colgroup>
+              {assetType === "hardware" ? (
+                <>
+                  <col style={{ width: "22%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "20%" }} />
+                </>
+              ) : (
+                <>
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "10%" }} />
+                </>
+              )}
+            </colgroup>
             <TableHeader>
               <TableRow className="bg-slate-50 hover:bg-slate-50">
                 {assetType === "hardware" ? (
                   <>
-                    <TableHead className="w-[120px] text-center">카테고리</TableHead>
-                    <TableHead className="w-[90px] text-center">전체 수량</TableHead>
-                    <TableHead className="w-[90px] text-center">잔여 수량</TableHead>
-                    <TableHead className="w-[120px] text-center">밴더</TableHead>
-                    <TableHead className="w-[100px] text-center">연한 초과</TableHead>
+                    <TableHead className="text-center">자산명</TableHead>
+                    <TableHead className="text-center">카테고리</TableHead>
+                    <TableHead className="text-center">전체 수량</TableHead>
+                    <TableHead className="text-center">잔여 수량</TableHead>
+                    <TableHead className="text-center">밴더</TableHead>
+                    <TableHead className="text-center">연한 초과</TableHead>
                   </>
                 ) : (
                   <>
-                    <TableHead className="w-[120px] text-center">카테고리</TableHead>
+                    <TableHead className="text-center">카테고리</TableHead>
                     <TableHead className="text-center">소프트웨어 이름</TableHead>
-                    <TableHead className="w-[90px] text-center">전체 수량</TableHead>
-                    <TableHead className="w-[90px] text-center">잔여 수량</TableHead>
-                    <TableHead className="w-[140px] text-center">라이선스 만료일</TableHead>
+                    <TableHead className="text-center">전체 수량</TableHead>
+                    <TableHead className="text-center">잔여 수량</TableHead>
+                    <TableHead className="text-center">라이선스 만료일</TableHead>
                     <TableHead className="text-center">비고</TableHead>
                   </>
                 )}
-                <TableHead className="w-[80px] text-center">관리</TableHead>
+                <TableHead className="text-center">관리</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {assetType === "hardware" &&
                 pageItems.map((row) => (
                   <TableRow key={row.key} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={row.representative.name || "-"} /></TableCell>
                     <TableCell className="text-center"><AutoFitText value={row.representative.category} /></TableCell>
                     <TableCell className="text-center"><AutoFitText value={String(row.totalQuantity)} /></TableCell>
                     <TableCell className="text-center"><AutoFitText value={String(row.availableQuantity)} /></TableCell>
@@ -1257,22 +1369,34 @@ function RegisteredAssetEditModal({
   onClose: () => void;
   onSave: (asset: Asset) => void;
 }) {
+  const laptopVendorOptions = ["HP", "삼성", "LG", "Apple"] as const;
   const [draft, setDraft] = useState<Asset>({ ...asset });
-  const requiresHardwareOs = draft.type === "hardware" && (draft.category === "랩탑" || draft.category === "데스크탑");
   const requiresHardwareVendor = draft.type === "hardware";
+  const usesLaptopVendorSelect = draft.type === "hardware" && draft.category === "랩탑";
 
   useEffect(() => {
     setDraft({ ...asset });
   }, [asset]);
 
   const handleSave = () => {
+    const originalTotalQuantity = asset.totalQuantity ?? asset.quantity ?? 0;
+    const originalAvailableQuantity = asset.quantity ?? 0;
+    const assignedQuantity = Math.max(originalTotalQuantity - originalAvailableQuantity, 0);
+    const nextTotalQuantity = Math.max(1, draft.totalQuantity ?? draft.quantity ?? 1);
+    const nextAvailableQuantity = Math.max(nextTotalQuantity - assignedQuantity, 0);
+
+    if (draft.type === "hardware" && !draft.name.trim()) return;
+    if (requiresHardwareVendor && !draft.vendor?.trim()) return;
     onSave({
       ...draft,
+      name: draft.type === "hardware" ? draft.name.trim() : draft.name,
       softwareName: draft.type === "software" ? (draft.softwareName ?? draft.name).trim() : undefined,
+      totalQuantity: nextTotalQuantity,
+      quantity: nextAvailableQuantity,
       createdAt: draft.createdAt || undefined,
       acquiredAt: draft.acquiredAt || undefined,
       expiresAt: draft.expiresAt || undefined,
-      os: requiresHardwareOs ? draft.os?.trim() || undefined : undefined,
+      os: undefined,
       vendor: requiresHardwareVendor ? draft.vendor?.trim() || undefined : undefined,
     });
   };
@@ -1285,6 +1409,11 @@ function RegisteredAssetEditModal({
           <Button variant="outline" onClick={onClose}>닫기</Button>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
+          {draft.type === "hardware" && (
+            <FormRow label="자산명" stacked>
+              <Input value={draft.name} onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))} />
+            </FormRow>
+          )}
           {draft.type === "software" && (
             <FormRow label="소프트웨어명" stacked>
               <Input value={draft.softwareName ?? draft.name} onChange={(event) => setDraft((prev) => ({ ...prev, softwareName: event.target.value }))} />
@@ -1294,7 +1423,16 @@ function RegisteredAssetEditModal({
             <select
               className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
               value={draft.category}
-              onChange={(event) => setDraft((prev) => ({ ...prev, category: event.target.value }))}
+              onChange={(event) =>
+                setDraft((prev) => {
+                  const nextCategory = event.target.value;
+                  const nextVendor =
+                    nextCategory === "랩탑" && !laptopVendorOptions.includes((prev.vendor ?? "") as (typeof laptopVendorOptions)[number])
+                      ? laptopVendorOptions[0]
+                      : prev.vendor;
+                  return { ...prev, category: nextCategory, vendor: nextVendor };
+                })
+              }
             >
               {(draft.type === "hardware" ? policySettings.hardwareCategories : policySettings.softwareCategories).map((category) => (
                 <option key={category}>{category}</option>
@@ -1304,32 +1442,39 @@ function RegisteredAssetEditModal({
           <FormRow label={draft.type === "hardware" ? "도입가" : "단가"} stacked>
             <Input type="number" min={0} value={String(draft.unitPrice ?? 0)} onChange={(event) => setDraft((prev) => ({ ...prev, unitPrice: Math.max(0, Number(event.target.value) || 0) }))} />
           </FormRow>
+          <FormRow label="수량" stacked>
+            <Input
+              type="number"
+              min={1}
+              value={String(draft.totalQuantity ?? draft.quantity ?? 1)}
+              onChange={(event) => {
+                const quantity = Math.max(1, Number(event.target.value) || 1);
+                setDraft((prev) => ({ ...prev, totalQuantity: quantity }));
+              }}
+            />
+          </FormRow>
           {draft.type === "hardware" && (
             <FormRow label="도입일" stacked>
               <Input type="date" value={draft.acquiredAt ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, acquiredAt: event.target.value }))} />
             </FormRow>
           )}
-          {requiresHardwareOs && (
-            <FormRow label="OS 정보" stacked>
-              <Input value={draft.os ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, os: event.target.value }))} />
-            </FormRow>
-          )}
           {requiresHardwareVendor && (
             <FormRow label="밴더" stacked>
-              <Input value={draft.vendor ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))} />
-            </FormRow>
-          )}
-          {draft.type === "software" && (
-            <FormRow label="수량" stacked>
-              <Input
-                type="number"
-                min={1}
-                value={String(draft.totalQuantity ?? draft.quantity ?? 1)}
-                onChange={(event) => {
-                  const quantity = Math.max(1, Number(event.target.value) || 1);
-                  setDraft((prev) => ({ ...prev, totalQuantity: quantity, quantity: quantity }));
-                }}
-              />
+              {usesLaptopVendorSelect ? (
+                <select
+                  className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-sm outline-none"
+                  value={draft.vendor ?? laptopVendorOptions[0]}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))}
+                >
+                  {laptopVendorOptions.map((vendor) => (
+                    <option key={vendor} value={vendor}>
+                      {vendor}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input value={draft.vendor ?? ""} onChange={(event) => setDraft((prev) => ({ ...prev, vendor: event.target.value }))} />
+              )}
             </FormRow>
           )}
           {draft.type === "software" && (
@@ -1910,7 +2055,7 @@ export function MemberTable({
               <TableRow className="bg-slate-50 hover:bg-slate-50">
                 <TableHead className="w-[90px] text-center">이름</TableHead>
                 <TableHead className="w-[150px] text-center">이메일</TableHead>
-                <TableHead className="w-[160px] text-center">부서</TableHead>
+                <TableHead className="w-[160px] text-center">소속 유닛</TableHead>
                 <TableHead className="text-center">권한</TableHead>
                 <TableHead className="w-[150px] text-center">가입일</TableHead>
                 <TableHead className="w-[180px] text-center">최종 접속일</TableHead>
@@ -2029,7 +2174,7 @@ export function UsageTable({ search, data }: { search: string; data: readonly Us
             <TableHeader>
               <TableRow className="bg-slate-50 hover:bg-slate-50">
                 <TableHead className="w-[100px] text-center">사용자</TableHead>
-                <TableHead className="w-[100px] text-center">부서</TableHead>
+                <TableHead className="w-[100px] text-center">소속 유닛</TableHead>
                 <TableHead className="w-[90px] text-center">자산 유형</TableHead>
                 <TableHead className="w-[120px] text-center">카테고리</TableHead>
                 <TableHead className="w-[150px] text-center">PC Name</TableHead>
@@ -2060,13 +2205,38 @@ export function SecuritySettings({
   sessionTimeout,
   setAllowedDomains,
   setSessionTimeout,
+  googleWorkspaceLicenses,
+  googleWorkspaceLicenseRun,
+  isGoogleWorkspaceSyncing,
+  isGoogleWorkspaceImporting,
+  onGoogleWorkspaceSync,
+  onGoogleWorkspaceImport,
+  members,
 }: {
   allowedDomains: string[];
   sessionTimeout: string;
   setAllowedDomains: (value: string[]) => void;
   setSessionTimeout: (value: string) => void;
+  googleWorkspaceLicenses: GoogleWorkspaceLicense[];
+  googleWorkspaceLicenseRun: GoogleWorkspaceLicenseRun | null;
+  isGoogleWorkspaceSyncing: boolean;
+  isGoogleWorkspaceImporting: boolean;
+  onGoogleWorkspaceSync: () => void;
+  onGoogleWorkspaceImport: (file: File) => Promise<void>;
+  members: Member[];
 }) {
   const [domainInput, setDomainInput] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { pageItems, currentPage, totalPages, setCurrentPage } = usePagedData(googleWorkspaceLicenses);
+  const memberNameByEmail = useMemo(
+    () => new Map(members.map((member) => [member.email.trim().toLowerCase(), member.name.trim()])),
+    [members]
+  );
+  const latestSyncedLabel = googleWorkspaceLicenseRun?.finishedAt
+    ? formatAssetDate(googleWorkspaceLicenseRun.finishedAt)
+    : googleWorkspaceLicenseRun?.startedAt
+      ? formatAssetDate(googleWorkspaceLicenseRun.startedAt)
+      : "-";
 
   const handleAddDomain = () => {
     const nextDomain = domainInput.trim().toLowerCase();
@@ -2077,6 +2247,20 @@ export function SecuritySettings({
 
   const handleRemoveDomain = (domain: string) => {
     setAllowedDomains(allowedDomains.filter((item) => item !== domain));
+  };
+
+  const handleLicenseFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    await onGoogleWorkspaceImport(file);
+  };
+
+  const getLicenseDisplayName = (license: GoogleWorkspaceLicense) => {
+    const matchedName = memberNameByEmail.get(license.userEmail.trim().toLowerCase());
+    if (matchedName) return matchedName;
+    if (license.userId && !license.userId.includes("@")) return license.userId;
+    return license.userEmail.split("@")[0] || license.userEmail;
   };
 
   return (
@@ -2133,6 +2317,99 @@ export function SecuritySettings({
             </select>
           </div>
           <Button className="mt-4 rounded-[10px]">타임아웃 저장</Button>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-[18px] border border-[#e7eaf3] bg-white shadow-[0_18px_40px_rgba(18,24,40,0.05)] lg:col-span-2">
+        <CardContent className="p-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Google Workspace 라이선스 업로드</h3>
+              <p className="mt-2 text-sm text-slate-500">
+                Admin 콘솔에서 내보낸 CSV/XLSX 파일을 업로드해서 현재 할당된 라이선스 목록을 기준 데이터로 반영합니다.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={handleLicenseFileChange}
+              />
+              <Button
+                className="rounded-[10px]"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isGoogleWorkspaceImporting}
+              >
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                {isGoogleWorkspaceImporting ? "업로드 중..." : "CSV/XLSX 업로드"}
+              </Button>
+              <Button className="rounded-[10px]" onClick={onGoogleWorkspaceSync} disabled={isGoogleWorkspaceSyncing}>
+                {isGoogleWorkspaceSyncing ? "동기화 중..." : "API 동기화"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-[12px] border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">최근 동기화</p>
+              <p className="mt-1 text-sm font-medium text-slate-900">{latestSyncedLabel}</p>
+            </div>
+            <div className="rounded-[12px] border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">동기화 상태</p>
+              <div className="mt-1">
+                <Badge className={googleWorkspaceLicenseRun?.status === "success" ? "bg-emerald-100 text-emerald-700" : googleWorkspaceLicenseRun?.status === "error" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}>
+                  {googleWorkspaceLicenseRun?.status === "success" ? "성공" : googleWorkspaceLicenseRun?.status === "error" ? "실패" : googleWorkspaceLicenseRun?.status === "running" ? "진행 중" : "미실행"}
+                </Badge>
+              </div>
+            </div>
+            <div className="rounded-[12px] border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">최근 스냅샷 수</p>
+              <p className="mt-1 text-sm font-medium text-slate-900">
+                {googleWorkspaceLicenseRun?.totalAssignments ?? googleWorkspaceLicenses.length}건
+              </p>
+            </div>
+          </div>
+
+          {googleWorkspaceLicenseRun?.errorMessage && (
+            <div className="mt-4 rounded-[12px] border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              {googleWorkspaceLicenseRun.errorMessage}
+            </div>
+          )}
+
+          <div className="mt-4 overflow-hidden rounded-[12px] border border-slate-200">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50 hover:bg-slate-50">
+                  <TableHead className="text-center">이름</TableHead>
+                  <TableHead className="text-center">사용자 이메일</TableHead>
+                  <TableHead className="text-center">SKU</TableHead>
+                  <TableHead className="text-center">SKU ID</TableHead>
+                  <TableHead className="text-center">Product ID</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {googleWorkspaceLicenses.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-6 text-center text-sm text-slate-500">
+                      아직 동기화된 Google Workspace 라이선스가 없습니다.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {pageItems.map((license) => (
+                  <TableRow key={license.id} className="hover:bg-slate-50/80">
+                    <TableCell className="text-center"><AutoFitText value={getLicenseDisplayName(license)} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={license.userEmail} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={license.skuName || "-"} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={license.skuId} /></TableCell>
+                    <TableCell className="text-center"><AutoFitText value={license.productId} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <TablePagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
         </CardContent>
       </Card>
     </div>
@@ -2195,31 +2472,31 @@ export function AssetPolicySettingsForm({
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-4 rounded-[10px] border border-slate-200 bg-slate-50 p-3">
             <div>
-              <label className="block text-sm font-medium text-slate-700">하드웨어 카테고리</label>
+              <label className="block text-xs font-medium text-slate-700">하드웨어 카테고리</label>
               <Input
-                className="mt-2 h-11 rounded-[10px] bg-white"
+                className="mt-2 h-9 rounded-[10px] bg-white text-xs"
                 value={draft.hardwareCategories}
                 onChange={(event) => setDraft((prev) => ({ ...prev, hardwareCategories: event.target.value }))}
                 placeholder="모니터, 랩탑, 데스크탑"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">하드웨어 기본 Prefix</label>
+              <label className="block text-xs font-medium text-slate-700">하드웨어 기본 Prefix</label>
               <Input
-                className="mt-2 h-11 rounded-[10px] bg-white"
+                className="mt-2 h-9 rounded-[10px] bg-white text-xs"
                 value={draft.hardwarePrefix}
                 onChange={(event) => setDraft((prev) => ({ ...prev, hardwarePrefix: event.target.value }))}
                 placeholder="H"
               />
             </div>
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700">하드웨어 카테고리별 ID Prefix</label>
+              <label className="block text-xs font-medium text-slate-700">하드웨어 카테고리별 ID Prefix</label>
               <div className="grid gap-3 md:grid-cols-1 xl:grid-cols-2">
                 {hardwareCategories.map((category) => (
                   <div key={category} className="space-y-2">
                     <label className="block text-xs font-medium text-slate-500">{category}</label>
                     <Input
-                      className="h-11 rounded-[10px] bg-white"
+                      className="h-9 rounded-[10px] bg-white text-xs"
                       value={draft.hardwareCategoryPrefixes[category] ?? draft.hardwarePrefix}
                       onChange={(event) =>
                         setDraft((prev) => ({
@@ -2236,31 +2513,31 @@ export function AssetPolicySettingsForm({
           </div>
           <div className="space-y-4 rounded-[10px] border border-slate-200 bg-slate-50 p-3">
             <div>
-              <label className="block text-sm font-medium text-slate-700">소프트웨어 카테고리</label>
+              <label className="block text-xs font-medium text-slate-700">소프트웨어 카테고리</label>
               <Input
-                className="mt-2 h-11 rounded-[10px] bg-white"
+                className="mt-2 h-9 rounded-[10px] bg-white text-xs"
                 value={draft.softwareCategories}
                 onChange={(event) => setDraft((prev) => ({ ...prev, softwareCategories: event.target.value }))}
                 placeholder="OS, 데이터베이스, 보안"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">소프트웨어 기본 Prefix</label>
+              <label className="block text-xs font-medium text-slate-700">소프트웨어 기본 Prefix</label>
               <Input
-                className="mt-2 h-11 rounded-[10px] bg-white"
+                className="mt-2 h-9 rounded-[10px] bg-white text-xs"
                 value={draft.softwarePrefix}
                 onChange={(event) => setDraft((prev) => ({ ...prev, softwarePrefix: event.target.value }))}
                 placeholder="S"
               />
             </div>
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700">소프트웨어 카테고리별 ID Prefix</label>
+              <label className="block text-xs font-medium text-slate-700">소프트웨어 카테고리별 ID Prefix</label>
               <div className="grid gap-3 md:grid-cols-1 xl:grid-cols-2">
                 {softwareCategories.map((category) => (
                   <div key={category} className="space-y-2">
                     <label className="block text-xs font-medium text-slate-500">{category}</label>
                     <Input
-                      className="h-11 rounded-[10px] bg-white"
+                      className="h-9 rounded-[10px] bg-white text-xs"
                       value={draft.softwareCategoryPrefixes[category] ?? draft.softwarePrefix}
                       onChange={(event) =>
                         setDraft((prev) => ({
@@ -2276,23 +2553,23 @@ export function AssetPolicySettingsForm({
             </div>
           </div>
           <div className="space-y-2 md:col-span-2">
-            <label className="block text-sm font-medium text-slate-700">시퀀스 자릿수</label>
+            <label className="block text-xs font-medium text-slate-700">시퀀스 자릿수</label>
             <Input
               type="number"
               min={1}
-              className="h-11 rounded-[10px]"
+              className="h-9 rounded-[10px] text-xs"
               value={draft.sequenceDigits}
               onChange={(event) => setDraft((prev) => ({ ...prev, sequenceDigits: event.target.value }))}
               placeholder="3"
             />
           </div>
         </div>
-        <div className="rounded-[10px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+        <div className="rounded-[10px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
           예시 ID: {(draft.hardwareCategoryPrefixes[hardwareCategories[0]] || draft.hardwarePrefix || "H")}-{String(1).padStart(Math.max(1, Number(draft.sequenceDigits) || 3), "0")} /{" "}
           {(draft.softwareCategoryPrefixes[softwareCategories[0]] || draft.softwarePrefix || "S")}-{String(1).padStart(Math.max(1, Number(draft.sequenceDigits) || 3), "0")}
         </div>
         <div className="flex justify-end">
-          <Button className="rounded-[10px]" onClick={handleSave}>
+          <Button className="h-9 rounded-[10px] px-3 text-xs" onClick={handleSave}>
             자산 설정 저장
           </Button>
         </div>
@@ -2519,9 +2796,9 @@ type PairRow = {
 
 function PairedFormGrid({ description, rows }: { description: string; rows: PairRow[] }) {
   return (
-    <div className="space-y-2">
-      <div className="grid w-full gap-2 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-[8px] border border-slate-200">
+    <div className="h-full space-y-2">
+      <div className="grid h-full w-full gap-2 lg:grid-cols-2">
+        <div className="overflow-y-auto rounded-[8px] border border-slate-200">
           <div className="grid gap-px bg-slate-200">
             <RegistrationHeaderRow description="실제 입력값입니다. 왼쪽에서 등록하거나 할당할 값을 입력합니다." />
             {rows.map((row) => (
@@ -2532,7 +2809,7 @@ function PairedFormGrid({ description, rows }: { description: string; rows: Pair
           </div>
         </div>
         <div className="rounded-[12px] border border-slate-900 bg-slate-900 p-2 shadow-sm">
-          <div className="overflow-hidden rounded-[10px] border border-slate-700 bg-white">
+          <div className="h-full overflow-y-auto rounded-[10px] border border-slate-700 bg-white">
             <div className="grid gap-px bg-slate-200">
               <SampleHeaderRow description={description} />
               {rows.map((row) => (
@@ -2636,9 +2913,10 @@ function TablePagination({
 
 function AutoFitText({ value }: { value: string | number }) {
   const text = String(value);
+  const sizeClass = text.length > 24 ? "text-[10px] leading-[14px]" : text.length > 14 ? "text-[11px] leading-[16px]" : "text-[12px] leading-[18px]";
 
   return (
-    <span title={text} className="block truncate whitespace-nowrap text-[12px] leading-[18px]">
+    <span title={text} className={`block truncate whitespace-nowrap ${sizeClass}`}>
       {text}
     </span>
   );

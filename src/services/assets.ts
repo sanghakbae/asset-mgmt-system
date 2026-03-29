@@ -1,8 +1,11 @@
 import { supabase } from "@/lib/supabase";
 import type { Asset, AssetDraft, AssetType, HardwareAssignment, ImportedAssetRow, SoftwareAssignment } from "@/features/asset-management/types";
+import type { Member } from "@/features/asset-management/types";
+import type { GoogleWorkspaceLicense } from "@/services/google-workspace-licenses";
 
 type HardwareSaveRow = {
   id: string;
+  name: string | null;
   category: string;
   os: string | null;
   vendor: string | null;
@@ -51,6 +54,9 @@ type SoftwareAssignmentRow = {
   expires_at: string | null;
 };
 
+const HARDWARE_SAVE_COLUMNS = "id, name, category, os, vendor, unit_price, acquired_at, quantity, note, created_at";
+const HARDWARE_SAVE_COLUMNS_LEGACY = "id, category, os, vendor, unit_price, acquired_at, quantity, note, created_at";
+
 function quantityOrZero(value: number | undefined) {
   return Math.max(0, value ?? 0);
 }
@@ -68,13 +74,71 @@ function resolveCreatedAt(value?: string | null) {
   return normalizeOptionalTimestamp(value) ?? new Date().toISOString();
 }
 
+function isMissingNameColumnError(error: unknown) {
+  const message =
+    typeof error === "object" && error !== null
+      ? `${String((error as { message?: unknown }).message ?? "")} ${String((error as { details?: unknown }).details ?? "")}`
+      : String(error ?? "");
+  return message.includes("asset_hardware_save") && message.includes("name");
+}
+
+async function selectHardwareSaveRows() {
+  if (!supabase) throw new Error("Supabase is not configured");
+
+  const primary = await supabase.from("asset_hardware_save").select(HARDWARE_SAVE_COLUMNS).order("created_at", { ascending: false });
+  if (!primary.error) return primary.data as HardwareSaveRow[];
+  if (!isMissingNameColumnError(primary.error)) throw primary.error;
+
+  const fallback = await supabase.from("asset_hardware_save").select(HARDWARE_SAVE_COLUMNS_LEGACY).order("created_at", { ascending: false });
+  if (fallback.error) throw fallback.error;
+  return (fallback.data ?? []) as HardwareSaveRow[];
+}
+
+async function selectHardwareSaveRowById(assetId: string) {
+  if (!supabase) throw new Error("Supabase is not configured");
+
+  const primary = await supabase.from("asset_hardware_save").select(HARDWARE_SAVE_COLUMNS).eq("id", assetId).single();
+  if (!primary.error) return primary.data as HardwareSaveRow;
+  if (!isMissingNameColumnError(primary.error)) throw primary.error;
+
+  const fallback = await supabase.from("asset_hardware_save").select(HARDWARE_SAVE_COLUMNS_LEGACY).eq("id", assetId).single();
+  if (fallback.error) throw fallback.error;
+  return fallback.data as HardwareSaveRow;
+}
+
+async function insertHardwareSaveRow(insertPayload: Record<string, unknown>) {
+  if (!supabase) throw new Error("Supabase is not configured");
+
+  const primary = await supabase.from("asset_hardware_save").insert(insertPayload).select(HARDWARE_SAVE_COLUMNS).single();
+  if (!primary.error) return primary.data as HardwareSaveRow;
+  if (!isMissingNameColumnError(primary.error)) throw primary.error;
+
+  const { name: _ignoredName, ...legacyPayload } = insertPayload;
+  const fallback = await supabase.from("asset_hardware_save").insert(legacyPayload).select(HARDWARE_SAVE_COLUMNS_LEGACY).single();
+  if (fallback.error) throw fallback.error;
+  return fallback.data as HardwareSaveRow;
+}
+
+async function updateHardwareSaveRow(assetId: string, updatePayload: Record<string, unknown>) {
+  if (!supabase) throw new Error("Supabase is not configured");
+
+  const primary = await supabase.from("asset_hardware_save").update(updatePayload).eq("id", assetId).select(HARDWARE_SAVE_COLUMNS).single();
+  if (!primary.error) return primary.data as HardwareSaveRow;
+  if (!isMissingNameColumnError(primary.error)) throw primary.error;
+
+  const { name: _ignoredName, ...legacyPayload } = updatePayload;
+  const fallback = await supabase.from("asset_hardware_save").update(legacyPayload).eq("id", assetId).select(HARDWARE_SAVE_COLUMNS_LEGACY).single();
+  if (fallback.error) throw fallback.error;
+  return fallback.data as HardwareSaveRow;
+}
+
 function mapHardwareSaveAsset(row: HardwareSaveRow, assignedQuantity: number): Asset {
   const totalQuantity = quantityOrZero(row.quantity);
   const availableQuantity = Math.max(totalQuantity - quantityOrZero(assignedQuantity), 0);
   return {
     dbId: row.id,
     id: row.id,
-    name: normalizeHardwareCategory(row.category),
+    name: row.name?.trim() || normalizeHardwareCategory(row.category),
     softwareName: undefined,
     type: "hardware",
     category: normalizeHardwareCategory(row.category),
@@ -115,32 +179,30 @@ function mapSoftwareSaveAsset(row: SoftwareSaveRow, assignedQuantity: number): A
 async function getAssetMasterById(assetId: string, type: AssetType) {
   if (!supabase) throw new Error("Supabase is not configured");
 
-  const table = type === "hardware" ? "asset_hardware_save" : "asset_software_save";
-  const columns =
-    type === "hardware"
-      ? "id, category, os, vendor, unit_price, acquired_at, quantity, note, created_at"
-      : "id, category, software_name, unit_price, expires_at, quantity, note, created_at";
-  const { data, error } = await supabase.from(table).select(columns).eq("id", assetId).single();
+  if (type === "hardware") {
+    return selectHardwareSaveRowById(assetId);
+  }
 
+  const { data, error } = await supabase
+    .from("asset_software_save")
+    .select("id, category, software_name, unit_price, expires_at, quantity, note, created_at")
+    .eq("id", assetId)
+    .single();
   if (error) throw error;
-  return data as HardwareSaveRow | SoftwareSaveRow;
+  return data as SoftwareSaveRow;
 }
 
 export async function listAssets(): Promise<Asset[]> {
   if (!supabase) throw new Error("Supabase is not configured");
 
-  const [{ data: hardwareSaveRows, error: hardwareSaveError }, { data: softwareSaveRows, error: softwareSaveError }, { data: hardwareRows, error: hardwareError }, { data: softwareRows, error: softwareError }] =
+  const [{ data: softwareSaveRows, error: softwareSaveError }, { data: hardwareRows, error: hardwareError }, { data: softwareRows, error: softwareError }, hardwareSaveRows] =
     await Promise.all([
-      supabase
-        .from("asset_hardware_save")
-        .select("id, category, os, vendor, unit_price, acquired_at, quantity, note, created_at")
-        .order("created_at", { ascending: false }),
       supabase.from("asset_software_save").select("id, category, software_name, unit_price, expires_at, quantity, note, created_at").order("created_at", { ascending: false }),
       supabase.from("asset_hardware").select("asset_id").not("user_name", "is", null),
       supabase.from("asset_software").select("asset_id, assigned_quantity").not("user_name", "is", null),
+      selectHardwareSaveRows(),
     ]);
 
-  if (hardwareSaveError) throw hardwareSaveError;
   if (softwareSaveError) throw softwareSaveError;
   if (hardwareError) throw hardwareError;
   if (softwareError) throw softwareError;
@@ -158,7 +220,7 @@ export async function listAssets(): Promise<Asset[]> {
   }
 
   return [
-    ...((hardwareSaveRows ?? []) as HardwareSaveRow[]).map((row) => mapHardwareSaveAsset(row, hardwareAssignedCountMap.get(row.id) ?? 0)),
+    ...(hardwareSaveRows ?? []).map((row) => mapHardwareSaveAsset(row, hardwareAssignedCountMap.get(row.id) ?? 0)),
     ...((softwareSaveRows ?? []) as SoftwareSaveRow[]).map((row) => mapSoftwareSaveAsset(row, softwareAssignedCountMap.get(row.id) ?? 0)),
   ].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
@@ -250,6 +312,7 @@ export async function createAsset(draft: AssetDraft, type: AssetType): Promise<A
 
   if (type === "hardware") {
     const insertPayload: Record<string, unknown> = {
+      name: draft.name.trim() || null,
       category: draft.category,
       os: draft.os?.trim() || null,
       vendor: draft.vendor?.trim() || null,
@@ -260,14 +323,8 @@ export async function createAsset(draft: AssetDraft, type: AssetType): Promise<A
     };
     insertPayload.created_at = createdAt;
 
-    const { data, error } = await supabase
-      .from("asset_hardware_save")
-      .insert(insertPayload)
-      .select("id, category, os, vendor, unit_price, acquired_at, quantity, note, created_at")
-      .single();
-
-    if (error) throw error;
-    return [mapHardwareSaveAsset(data as HardwareSaveRow, 0)];
+    const data = await insertHardwareSaveRow(insertPayload);
+    return [mapHardwareSaveAsset(data, 0)];
   }
 
   const softwareName = (draft.softwareName ?? draft.name).trim();
@@ -333,6 +390,7 @@ export async function updateAsset(assetId: string, asset: Asset): Promise<Asset>
 
   if (asset.type === "hardware") {
     const updatePayload: Record<string, unknown> = {
+      name: asset.name.trim() || null,
       category: asset.category,
       os: asset.os?.trim() || null,
       vendor: asset.vendor?.trim() || null,
@@ -343,17 +401,9 @@ export async function updateAsset(assetId: string, asset: Asset): Promise<Asset>
     };
     updatePayload.created_at = createdAt;
 
-    const { data, error } = await supabase
-      .from("asset_hardware_save")
-      .update(updatePayload)
-      .eq("id", assetId)
-      .select("id, category, os, vendor, unit_price, acquired_at, quantity, note, created_at")
-      .single();
-
-    if (error) throw error;
-
+    const data = await updateHardwareSaveRow(assetId, updatePayload);
     const assignedQuantity = await getHardwareAssignedQuantity(assetId);
-    return mapHardwareSaveAsset(data as HardwareSaveRow, assignedQuantity);
+    return mapHardwareSaveAsset(data, assignedQuantity);
   }
 
   const softwareName = (asset.softwareName ?? asset.name).trim();
@@ -468,6 +518,106 @@ export async function reclaimSoftwareAssignment(assignmentId: string) {
   if (error) throw error;
 }
 
+export async function syncGoogleWorkspaceSoftwareAsset(
+  licenses: GoogleWorkspaceLicense[],
+  members: Member[],
+  totalSeats: number = 150
+) {
+  if (!supabase) throw new Error("Supabase is not configured");
+
+  const softwareName = "Google Workspace";
+  const category = "Google Workspace";
+  const normalizedTotalSeats = Math.max(1, totalSeats);
+
+  const uniqueLicenses = Array.from(
+    new Map(licenses.map((license) => [license.userEmail.trim().toLowerCase(), license])).values()
+  );
+
+  if (uniqueLicenses.length > normalizedTotalSeats) {
+    throw new Error(`현재 Google Workspace 할당자 ${uniqueLicenses.length}명이 150석을 초과합니다.`);
+  }
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("asset_software_save")
+    .select("id, category, software_name, unit_price, expires_at, quantity, note, created_at")
+    .eq("software_name", softwareName)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (existingError) throw existingError;
+
+  const existing = (existingRows?.[0] as SoftwareSaveRow | undefined) ?? null;
+  const createdAt = existing?.created_at ?? new Date().toISOString();
+  const savePayload = {
+    category,
+    software_name: softwareName,
+    unit_price: 0,
+    expires_at: null,
+    quantity: normalizedTotalSeats,
+    note: "Google Workspace 라이선스 자동 반영",
+    created_at: createdAt,
+  };
+
+  let assetId = existing?.id ?? "";
+  if (existing) {
+    const { data, error } = await supabase
+      .from("asset_software_save")
+      .update(savePayload)
+      .eq("id", existing.id)
+      .select("id")
+      .single();
+    if (error) throw error;
+    assetId = String(data.id);
+  } else {
+    const { data, error } = await supabase
+      .from("asset_software_save")
+      .insert(savePayload)
+      .select("id")
+      .single();
+    if (error) throw error;
+    assetId = String(data.id);
+  }
+
+  const { error: deleteAssignmentsError } = await supabase.from("asset_software").delete().eq("asset_id", assetId);
+  if (deleteAssignmentsError) throw deleteAssignmentsError;
+
+  const memberByEmail = new Map(members.map((member) => [member.email.trim().toLowerCase(), member]));
+  const remainingSeats = Math.max(normalizedTotalSeats - uniqueLicenses.length, 0);
+
+  if (uniqueLicenses.length > 0) {
+    const { error: insertAssignmentsError } = await supabase.from("asset_software").insert(
+      uniqueLicenses.map((license) => {
+        const matchedMember = memberByEmail.get(license.userEmail.trim().toLowerCase());
+        const fallbackName =
+          license.userId && !license.userId.includes("@") ? license.userId : license.userEmail.split("@")[0] || license.userEmail;
+
+        return {
+          asset_id: assetId,
+          software_name: softwareName,
+          status: "사용",
+          category,
+          unit_price: 0,
+          total_seats: normalizedTotalSeats,
+          available_seats: remainingSeats,
+          expires_at: null,
+          user_name: matchedMember?.name?.trim() || fallbackName,
+          department: matchedMember?.department?.trim() || "-",
+          assigned_quantity: 1,
+          assigned_at: new Date().toISOString(),
+          note: "Google Workspace 라이선스 자동 반영",
+        };
+      })
+    );
+    if (insertAssignmentsError) throw insertAssignmentsError;
+  }
+
+  return {
+    assetId,
+    totalSeats: normalizedTotalSeats,
+    assignedSeats: uniqueLicenses.length,
+    availableSeats: remainingSeats,
+  };
+}
+
 export async function importAssetsBulk(rows: ImportedAssetRow[]): Promise<Asset[]> {
   if (!supabase) throw new Error("Supabase is not configured");
   if (rows.length === 0) return [];
@@ -478,6 +628,7 @@ export async function importAssetsBulk(rows: ImportedAssetRow[]): Promise<Asset[
   const softwareRows = rows.filter((row) => row.importKind !== "assignment" && row.type === "software");
 
   const hardwareInserts = hardwareRows.map((row) => ({
+    name: row.name?.trim() || null,
     category: normalizeHardwareCategory(row.category),
     os: row.os?.trim() || null,
     vendor: row.vendor?.trim() || null,

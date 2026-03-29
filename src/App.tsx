@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultAssetPolicySettings, mockAssets, mockAuditLogs, mockMembers, mockOrgMembers } from "@/features/asset-management/data";
 import {
   AssetRegistrationForm,
@@ -32,9 +32,18 @@ import {
   listSoftwareAssignments,
   reclaimHardwareAssignment,
   reclaimSoftwareAssignment,
+  syncGoogleWorkspaceSoftwareAsset,
   updateAsset,
 } from "@/services/assets";
 import { exportAssetsToExcel, exportOrgMembersToExcel } from "@/services/excel";
+import {
+  getLatestGoogleWorkspaceLicenseRun,
+  importGoogleWorkspaceLicensesFile,
+  listGoogleWorkspaceLicenses,
+  syncGoogleWorkspaceLicenses,
+  type GoogleWorkspaceLicense,
+  type GoogleWorkspaceLicenseRun,
+} from "@/services/google-workspace-licenses";
 import { deleteMember, ensureMemberForAuthUser, listMembers, updateMember } from "@/services/members";
 import { importOrgMembersBulk, listOrgMembers, updateOrgMember } from "@/services/org-members";
 import { getSecuritySettings, saveSecuritySettings } from "@/services/security-settings";
@@ -57,14 +66,63 @@ import type {
 } from "@/features/asset-management/types";
 
 export default function App() {
+  const DEFAULT_USER = {
+    name: "홍길동",
+    email: "hong@muhayu.com",
+    department: "보안팀",
+    role: "Admin" as Role,
+  };
+
+  const getStoredLoginState = () => {
+    if (typeof window === "undefined") return false;
+    return window.sessionStorage.getItem("asset-mgmt-is-logged-in") === "1";
+  };
+  const getStoredUser = () => {
+    if (typeof window === "undefined") return DEFAULT_USER;
+
+    const raw = window.sessionStorage.getItem("asset-mgmt-user");
+    if (!raw) return DEFAULT_USER;
+
+    try {
+      const parsed = JSON.parse(raw) as { name?: string; email?: string; department?: string; role?: Role };
+      return {
+        name: parsed.name || DEFAULT_USER.name,
+        email: parsed.email || DEFAULT_USER.email,
+        department: parsed.department || DEFAULT_USER.department,
+        role: parsed.role || DEFAULT_USER.role,
+      };
+    } catch {
+      return DEFAULT_USER;
+    }
+  };
+  const getStoredMenu = (): MenuKey => {
+    if (typeof window === "undefined") return "dashboard";
+    const value = window.sessionStorage.getItem("asset-mgmt-menu");
+    return value === "dashboard" || value === "hardware" || value === "software" || value === "usage" || value === "register" || value === "user-register" || value === "settings"
+      ? value
+      : "dashboard";
+  };
+  const getStoredSettingsMenu = (): SettingsMenuKey => {
+    if (typeof window === "undefined") return "members";
+    const value = window.sessionStorage.getItem("asset-mgmt-settings-menu");
+    return value === "members" || value === "org-members" || value === "audit" || value === "asset-policy" || value === "security"
+      ? value
+      : "members";
+  };
+  const getStoredAssetType = (): AssetType => {
+    if (typeof window === "undefined") return "hardware";
+    const value = window.sessionStorage.getItem("asset-mgmt-asset-type");
+    return value === "hardware" || value === "software" ? value : "hardware";
+  };
+
   const [search, setSearch] = useState("");
   const [assets, setAssets] = useState<Asset[]>(isSupabaseConfigured ? [] : [...mockAssets]);
   const [assetsError, setAssetsError] = useState<string>("");
   const [isAssetsLoading, setIsAssetsLoading] = useState(false);
-  const [menu, setMenu] = useState<MenuKey>("dashboard");
-  const [settingsMenu, setSettingsMenu] = useState<SettingsMenuKey>("members");
-  const [assetType, setAssetType] = useState<AssetType>("hardware");
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [menu, setMenu] = useState<MenuKey>(getStoredMenu);
+  const [settingsMenu, setSettingsMenu] = useState<SettingsMenuKey>(getStoredSettingsMenu);
+  const [assetType, setAssetType] = useState<AssetType>(getStoredAssetType);
+  const [isLoggedIn, setIsLoggedIn] = useState(getStoredLoginState);
   const [isAuthLoading, setIsAuthLoading] = useState(isSupabaseConfigured);
   const [authError, setAuthError] = useState("");
   const [allowedDomains, setAllowedDomains] = useState<string[]>(["muhayu.com"]);
@@ -75,16 +133,40 @@ export default function App() {
   const [hardwareAssignments, setHardwareAssignments] = useState<HardwareAssignment[]>([]);
   const [softwareAssignments, setSoftwareAssignments] = useState<SoftwareAssignment[]>([]);
   const [assetPolicySettings, setAssetPolicySettings] = useState<AssetPolicySettings>(defaultAssetPolicySettings);
+  const [googleWorkspaceLicenses, setGoogleWorkspaceLicenses] = useState<GoogleWorkspaceLicense[]>([]);
+  const [googleWorkspaceLicenseRun, setGoogleWorkspaceLicenseRun] = useState<GoogleWorkspaceLicenseRun | null>(null);
+  const [isGoogleWorkspaceSyncing, setIsGoogleWorkspaceSyncing] = useState(false);
+  const [isGoogleWorkspaceImporting, setIsGoogleWorkspaceImporting] = useState(false);
+
+  const clearClientAuthState = () => {
+    setIsLoggedIn(false);
+    setSessionExpiresAt(null);
+    setUser(DEFAULT_USER);
+    if (typeof window === "undefined") return;
+
+    window.sessionStorage.removeItem("asset-mgmt-is-logged-in");
+    window.sessionStorage.removeItem("asset-mgmt-user");
+    window.sessionStorage.removeItem("asset-mgmt-login-pending");
+
+    const authKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith("sb-") && key.endsWith("-auth-token")) {
+        authKeys.push(key);
+      }
+    }
+    authKeys.forEach((key) => window.localStorage.removeItem(key));
+  };
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null);
   const [sessionNow, setSessionNow] = useState(() => Date.now());
-  const [user, setUser] = useState({
-    name: "홍길동",
-    email: "hong@muhayu.com",
-    department: "보안팀",
-    role: "Admin" as Role,
-  });
+  const [user, setUser] = useState(getStoredUser);
+  const allowedDomainsRef = useRef(allowedDomains);
+
+  useEffect(() => {
+    allowedDomainsRef.current = allowedDomains;
+  }, [allowedDomains]);
 
   const loweredSearch = search.toLowerCase();
 
@@ -124,9 +206,7 @@ export default function App() {
     if (!normalizedName) return fallback?.trim() || "-";
 
     const orgMember = orgMembers.find((member) => member.name.trim() === normalizedName);
-    const orgDepartment = [orgMember?.part, orgMember?.unit, orgMember?.cell, orgMember?.category]
-      .map((value) => value?.trim() || "")
-      .find(Boolean);
+    const orgDepartment = orgMember?.unit?.trim() || "";
     if (orgDepartment) return orgDepartment;
 
     const member = members.find((item) => item.name.trim() === normalizedName);
@@ -152,6 +232,43 @@ export default function App() {
       })),
     [softwareAssignments, members, orgMembers]
   );
+  const isSessionExpiredError = assetsError.includes("Supabase 세션이 만료되었습니다");
+
+  const applyAuthenticatedSession = async (session: Awaited<ReturnType<typeof getCurrentSession>>) => {
+    const email = session?.user?.email ?? null;
+    const authUser = session?.user ?? null;
+    if (!email || !authUser) {
+      clearClientAuthState();
+      throw new Error("로그인 세션을 찾지 못했습니다.");
+    }
+
+    const normalizedEmail = email.toLowerCase();
+    const domain = normalizedEmail.split("@")[1] ?? "";
+    const isAllowedDomain =
+      allowedDomainsRef.current.length === 0 ||
+      allowedDomainsRef.current.some((allowedDomain) => {
+        const normalizedAllowedDomain = allowedDomain.toLowerCase().trim();
+        return domain === normalizedAllowedDomain || domain.endsWith(`.${normalizedAllowedDomain}`);
+      });
+
+    if (!isAllowedDomain) {
+      await signOutAuth();
+      clearClientAuthState();
+      throw new Error("허용되지 않은 도메인입니다.");
+    }
+
+    const [currentMember, remoteMembers] = await Promise.all([ensureMemberForAuthUser(authUser), listMembers()]);
+    setMembers(remoteMembers);
+    setUser({
+      name: currentMember.name,
+      email: currentMember.email,
+      department: currentMember.department || "-",
+      role: currentMember.role,
+    });
+    setSessionExpiresAt(session?.expires_at ? session.expires_at * 1000 : null);
+    setAuthError("");
+    setIsLoggedIn(true);
+  };
 
   const usageItems = useMemo<UsageItem[]>(() => {
     const hardwareItems = resolvedHardwareAssignments.map((assignment) => ({
@@ -462,6 +579,62 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    let cancelled = false;
+
+    const syncExistingSession = async () => {
+      setIsAuthLoading(true);
+      try {
+        const session = await getCurrentSession();
+        if (!session) {
+          if (!cancelled) {
+            clearClientAuthState();
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          await applyAuthenticatedSession(session);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          clearClientAuthState();
+          setAuthError(error instanceof Error ? error.message : "로그인 세션 확인에 실패했습니다.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsAuthLoading(false);
+        }
+      }
+    };
+
+    void syncExistingSession();
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      void (async () => {
+        if (cancelled) return;
+        try {
+          if (!session) {
+            clearClientAuthState();
+            return;
+          }
+
+          await applyAuthenticatedSession(session);
+        } catch (error) {
+          clearClientAuthState();
+          setAuthError(error instanceof Error ? error.message : "로그인 상태 동기화에 실패했습니다.");
+        }
+      })();
+    });
+
+    return () => {
+      cancelled = true;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isSupabaseConfigured) return;
     if (isAuthLoading) return;
     if (!isLoggedIn) return;
@@ -473,7 +646,17 @@ export default function App() {
       setAssetsError("");
 
       try {
-        const [remoteAssets, remoteHardwareAssignments, remoteAssignments, remoteOrgMembers, remoteAssetPolicySettings, remoteSecuritySettings, remoteAuditLogs] = await Promise.all([
+        const [
+          remoteAssets,
+          remoteHardwareAssignments,
+          remoteAssignments,
+          remoteOrgMembers,
+          remoteAssetPolicySettings,
+          remoteSecuritySettings,
+          remoteAuditLogs,
+          remoteGoogleWorkspaceLicenses,
+          remoteGoogleWorkspaceLicenseRun,
+        ] = await Promise.all([
           listAssets(),
           listHardwareAssignments(),
           listSoftwareAssignments(),
@@ -481,6 +664,8 @@ export default function App() {
           getAssetPolicySettings(),
           getSecuritySettings(),
           listAuditLogs(),
+          listGoogleWorkspaceLicenses(),
+          getLatestGoogleWorkspaceLicenseRun(),
         ]);
         if (!cancelled) {
           setAssets(remoteAssets);
@@ -495,6 +680,8 @@ export default function App() {
             setAllowedDomains(remoteSecuritySettings.allowedDomains);
             setSessionTimeout(remoteSecuritySettings.sessionTimeout);
           }
+          setGoogleWorkspaceLicenses(remoteGoogleWorkspaceLicenses);
+          setGoogleWorkspaceLicenseRun(remoteGoogleWorkspaceLicenseRun);
         }
       } catch (error) {
         if (!cancelled) {
@@ -515,97 +702,39 @@ export default function App() {
   }, [isAuthLoading, isLoggedIn]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) {
-      setIsAuthLoading(false);
-      return;
-    }
+    if (!isSupabaseConfigured || !supabase) return;
+    if (typeof window === "undefined") return;
+    if (window.sessionStorage.getItem("asset-mgmt-login-pending") !== "1") return;
 
-    let mounted = true;
+    let cancelled = false;
 
-    const hydrateSession = async () => {
+    const completeLogin = async () => {
+      setIsAuthLoading(true);
+
       try {
         const session = await getCurrentSession();
-        await applySession(session?.user?.email ?? null, session?.user ?? null, session?.expires_at ?? null);
-      } catch (error) {
-        if (mounted) {
-          setAuthError(error instanceof Error ? error.message : "로그인 상태를 확인하지 못했습니다.");
-          setIsAuthLoading(false);
+        if (!cancelled) {
+          await applyAuthenticatedSession(session);
         }
-      }
-    };
-
-    const applySession = async (
-      email: string | null,
-      authUser: Parameters<Parameters<typeof supabase.auth.onAuthStateChange>[0]>[1]["user"] | null,
-      expiresAt?: number | null
-    ) => {
-      if (!mounted) return;
-
-      if (!email || !authUser) {
-        setIsLoggedIn(false);
-        setSessionExpiresAt(null);
-        setIsAuthLoading(false);
-        return;
-      }
-
-      const normalizedEmail = email.toLowerCase();
-      const domain = normalizedEmail.split("@")[1] ?? "";
-      const isAllowedDomain =
-        allowedDomains.length === 0 ||
-        allowedDomains.some((allowedDomain) => {
-          const normalizedAllowedDomain = allowedDomain.toLowerCase().trim();
-          return domain === normalizedAllowedDomain || domain.endsWith(`.${normalizedAllowedDomain}`);
-        });
-
-      if (!isAllowedDomain) {
-        await signOutAuth();
-        if (mounted) {
-          setAuthError("허용되지 않은 도메인입니다.");
-          setIsLoggedIn(false);
-          setIsAuthLoading(false);
-        }
-        return;
-      }
-
-      try {
-        const [currentMember, remoteMembers] = await Promise.all([ensureMemberForAuthUser(authUser), listMembers()]);
-        if (!mounted) return;
-
-        setMembers(remoteMembers);
-        setUser({
-          name: currentMember.name,
-          email: currentMember.email,
-          department: currentMember.department || "-",
-          role: currentMember.role,
-        });
-        setSessionExpiresAt(expiresAt ? expiresAt * 1000 : null);
-        setAuthError("");
-        setIsLoggedIn(true);
       } catch (error) {
-        if (mounted) {
-          setAuthError(error instanceof Error ? error.message : "회원 정보를 불러오지 못했습니다.");
-          setIsLoggedIn(false);
+        if (!cancelled) {
+          clearClientAuthState();
+          setAuthError(error instanceof Error ? error.message : "로그인 처리에 실패했습니다.");
         }
       } finally {
-        if (mounted) {
+        window.sessionStorage.removeItem("asset-mgmt-login-pending");
+        if (!cancelled) {
           setIsAuthLoading(false);
         }
       }
     };
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      void applySession(session?.user?.email ?? null, session?.user ?? null, session?.expires_at ?? null);
-    });
-
-    void hydrateSession();
+    void completeLogin();
 
     return () => {
-      mounted = false;
-      subscription.unsubscribe();
+      cancelled = true;
     };
-  }, [allowedDomains]);
+  }, []);
 
   useEffect(() => {
     if (menu === "settings" && !canOpenSettings(user.role)) {
@@ -621,6 +750,31 @@ export default function App() {
       setMenu(canViewMenu(user.role, "dashboard") ? "dashboard" : "hardware");
     }
   }, [menu, settingsMenu, user.role]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem("asset-mgmt-menu", menu);
+  }, [menu]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem("asset-mgmt-settings-menu", settingsMenu);
+  }, [settingsMenu]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem("asset-mgmt-asset-type", assetType);
+  }, [assetType]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem("asset-mgmt-is-logged-in", isLoggedIn ? "1" : "0");
+  }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem("asset-mgmt-user", JSON.stringify(user));
+  }, [user]);
 
   const handleMenuSelect = (key: MenuKey) => {
     if (!canViewMenu(user.role, key)) return;
@@ -682,7 +836,7 @@ export default function App() {
             return Array.from({ length: count }, () => {
               const asset: Asset = {
                 id: getNextAssetId(localAssets, selectedType, assetPolicySettings, draft.category),
-                name: "",
+                name: selectedType === "hardware" ? draft.name.trim() : "",
                 softwareName: selectedType === "software" ? draft.softwareName ?? draft.name : undefined,
                 type: selectedType,
                 category: draft.category,
@@ -694,6 +848,7 @@ export default function App() {
                 totalQuantity: selectedType === "software" ? Math.max(1, draft.quantity ?? draft.totalQuantity ?? 1) : undefined,
                 quantity: selectedType === "software" ? Math.max(1, draft.quantity ?? draft.availableQuantity ?? 1) : undefined,
                 os: undefined,
+                vendor: selectedType === "hardware" ? draft.vendor : undefined,
                 pcName: undefined,
                 assignee: undefined,
                 department: undefined,
@@ -822,6 +977,7 @@ export default function App() {
             totalQuantity: row.type === "software" ? row.totalQuantity ?? row.quantity ?? 0 : undefined,
             quantity: row.type === "software" ? row.availableQuantity ?? row.quantity ?? 0 : row.quantity ?? 0,
             os: row.os,
+            vendor: row.vendor,
             pcName: row.pcName,
             assignee: row.assignee,
             department: row.department,
@@ -957,6 +1113,76 @@ export default function App() {
     }
   };
 
+  const handleGoogleWorkspaceLicenseSync = async () => {
+    if (!isSupabaseConfigured || isGoogleWorkspaceSyncing) return;
+
+    try {
+      setIsGoogleWorkspaceSyncing(true);
+      setAssetsError("");
+
+      const result = await syncGoogleWorkspaceLicenses();
+      const [licenses, latestRun] = await Promise.all([listGoogleWorkspaceLicenses(), getLatestGoogleWorkspaceLicenseRun()]);
+      await syncGoogleWorkspaceSoftwareAsset(licenses, members, 150);
+      const [refreshedAssets, refreshedSoftwareAssignments] = await Promise.all([listAssets(), listSoftwareAssignments()]);
+      setAssets(refreshedAssets);
+      setSoftwareAssignments(refreshedSoftwareAssignments);
+      setGoogleWorkspaceLicenses(licenses);
+      setGoogleWorkspaceLicenseRun(latestRun);
+      showSuccessPopup(`Google Workspace 라이선스 ${result.totalAssignments ?? licenses.length}건을 동기화하고 150석 자산에 반영했습니다.`);
+      void createAuditLog({
+        type: "Google Workspace",
+        actor: user.email,
+        action: "라이선스 동기화",
+        target: `${result.totalAssignments ?? licenses.length}건`,
+      }).then(refreshAuditLogs);
+    } catch (error) {
+      const message = getErrorMessage(error, "Google Workspace 라이선스 동기화에 실패했습니다.");
+      try {
+        const latestRun = await getLatestGoogleWorkspaceLicenseRun();
+        setGoogleWorkspaceLicenseRun(latestRun);
+        if (latestRun?.errorMessage?.trim()) {
+          setAssetsError(latestRun.errorMessage.trim());
+          return;
+        }
+      } catch {
+        // Ignore secondary lookup failure and fall back to the original error.
+      }
+
+      setAssetsError(message);
+    } finally {
+      setIsGoogleWorkspaceSyncing(false);
+    }
+  };
+
+  const handleGoogleWorkspaceLicenseImport = async (file: File) => {
+    if (!isSupabaseConfigured || isGoogleWorkspaceImporting) return;
+
+    try {
+      setIsGoogleWorkspaceImporting(true);
+      setAssetsError("");
+
+      const result = await importGoogleWorkspaceLicensesFile(file);
+      const [licenses, latestRun] = await Promise.all([listGoogleWorkspaceLicenses(), getLatestGoogleWorkspaceLicenseRun()]);
+      await syncGoogleWorkspaceSoftwareAsset(licenses, members, 150);
+      const [refreshedAssets, refreshedSoftwareAssignments] = await Promise.all([listAssets(), listSoftwareAssignments()]);
+      setAssets(refreshedAssets);
+      setSoftwareAssignments(refreshedSoftwareAssignments);
+      setGoogleWorkspaceLicenses(licenses);
+      setGoogleWorkspaceLicenseRun(latestRun);
+      showSuccessPopup(`Google Workspace 라이선스 ${result.totalAssignments ?? licenses.length}건을 업로드하고 150석 자산에 반영했습니다.`);
+      void createAuditLog({
+        type: "Google Workspace",
+        actor: user.email,
+        action: "라이선스 업로드",
+        target: `${result.totalAssignments ?? licenses.length}건`,
+      }).then(refreshAuditLogs);
+    } catch (error) {
+      setAssetsError(getErrorMessage(error, "Google Workspace 라이선스 업로드에 실패했습니다."));
+    } finally {
+      setIsGoogleWorkspaceImporting(false);
+    }
+  };
+
   if (isAuthLoading) {
     return <AuthLoadingScreen />;
   }
@@ -973,9 +1199,15 @@ export default function App() {
 
           setAuthError("");
           setIsAuthLoading(true);
+          if (typeof window !== "undefined") {
+            window.sessionStorage.setItem("asset-mgmt-login-pending", "1");
+          }
           void signInWithGoogle().catch((error) => {
             setAuthError(error instanceof Error ? error.message : "Google 로그인에 실패했습니다.");
             setIsAuthLoading(false);
+            if (typeof window !== "undefined") {
+              window.sessionStorage.removeItem("asset-mgmt-login-pending");
+            }
           });
         }}
       />
@@ -1024,6 +1256,9 @@ export default function App() {
           onLogout={() => {
             if (!isSupabaseConfigured) {
               setIsLoggedIn(false);
+              if (typeof window !== "undefined") {
+                window.sessionStorage.removeItem("asset-mgmt-login-pending");
+              }
               return;
             }
 
@@ -1035,6 +1270,10 @@ export default function App() {
               .finally(() => {
                 setIsLoggedIn(false);
                 setIsAuthLoading(false);
+                setSessionExpiresAt(null);
+                if (typeof window !== "undefined") {
+                  window.sessionStorage.removeItem("asset-mgmt-login-pending");
+                }
               });
           }}
         />
@@ -1043,7 +1282,29 @@ export default function App() {
           <div className="w-full space-y-6">
             {assetsError && (
               <div className="rounded-[10px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                {assetsError}
+                <div>{assetsError}</div>
+                {isSessionExpiredError && isSupabaseConfigured && (
+                  <button
+                    type="button"
+                    className="mt-3 inline-flex h-9 items-center justify-center rounded-md border border-rose-300 bg-white px-3 text-xs font-medium text-rose-700 transition hover:bg-rose-100"
+                    onClick={() => {
+                      setIsAuthLoading(true);
+                      if (typeof window !== "undefined") {
+                        window.sessionStorage.setItem("asset-mgmt-login-pending", "1");
+                      }
+                      void signInWithGoogle()
+                        .catch((error) => {
+                          setAuthError(getErrorMessage(error, "다시 로그인에 실패했습니다."));
+                          setAssetsError(getErrorMessage(error, "다시 로그인에 실패했습니다."));
+                        })
+                        .finally(() => {
+                          setIsAuthLoading(false);
+                        });
+                    }}
+                  >
+                    다시 로그인
+                  </button>
+                )}
               </div>
             )}
 
@@ -1091,6 +1352,7 @@ export default function App() {
                 assets={assets}
                 hardwareAssignments={resolvedHardwareAssignments}
                 softwareAssignments={resolvedSoftwareAssignments}
+                orgMembers={orgMembers}
                 policySettings={assetPolicySettings}
                 onImportExcel={handleImportAssets}
                 onExportExcel={() => exportAssetsToExcel(resolvedHardwareAssignments, resolvedSoftwareAssignments)}
@@ -1123,6 +1385,13 @@ export default function App() {
                 setAllowedDomains={handleAllowedDomainsChange}
                 sessionTimeout={sessionTimeout}
                 setSessionTimeout={handleSessionTimeoutChange}
+                googleWorkspaceLicenses={googleWorkspaceLicenses}
+                googleWorkspaceLicenseRun={googleWorkspaceLicenseRun}
+                isGoogleWorkspaceSyncing={isGoogleWorkspaceSyncing}
+                isGoogleWorkspaceImporting={isGoogleWorkspaceImporting}
+                onGoogleWorkspaceSync={handleGoogleWorkspaceLicenseSync}
+                onGoogleWorkspaceImport={handleGoogleWorkspaceLicenseImport}
+                members={members}
               />
             )}
           </div>
